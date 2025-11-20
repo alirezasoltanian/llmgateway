@@ -1,1 +1,0 @@
-ALTER TABLE "log" ADD COLUMN "data_retention_cleaned_up" boolean DEFAULT false;

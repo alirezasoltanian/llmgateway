@@ -182,7 +182,7 @@ export const transaction = pgTable(
 );
 
 export const userOrganization = pgTable(
-	"user_organization",
+	"member",
 	{
 		id: text().primaryKey().notNull().$defaultFn(shortid),
 		createdAt: timestamp().notNull().defaultNow(),
@@ -203,8 +203,8 @@ export const userOrganization = pgTable(
 			.default("owner"),
 	},
 	(table) => [
-		index("user_organization_user_id_idx").on(table.userId),
-		index("user_organization_organization_id_idx").on(table.organizationId),
+		index("member_user_id_idx").on(table.userId),
+		index("member_organization_id_idx").on(table.organizationId),
 	],
 );
 
@@ -514,7 +514,7 @@ export const chat = pgTable(
 		userId: text()
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
-		model: text().notNull(),
+		model: text(),
 		status: text({
 			enum: ["active", "archived", "deleted"],
 		}).default("active"),
@@ -541,7 +541,7 @@ export const message = pgTable(
 		images: text(), // JSON string to store images array
 		reasoning: text(), // Reasoning content from AI models
 		tools: text(), // JSON string to store tool call parts
-		sequence: integer().notNull(), // To maintain message order
+		sequence: integer(), // To maintain message order
 	},
 	(table) => [index("message_chat_id_idx").on(table.chatId)],
 );

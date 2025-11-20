@@ -1,1 +1,0 @@
-ALTER TABLE "provider_key" ADD COLUMN "options" jsonb;

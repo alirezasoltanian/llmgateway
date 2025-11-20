@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import Stripe from "stripe";
 import { z } from "zod";
 
@@ -27,10 +28,15 @@ import { calculateFees } from "@llmgateway/shared";
 
 import {
 	calculateMinutelyHistory,
+	calculateCurrentMinuteHistory,
 	calculateAggregatedStatistics,
 	backfillHistoryIfNeeded,
 } from "./services/stats-calculator.js";
 import { syncProvidersAndModels } from "./services/sync-models.js";
+
+// Configuration for current minute history calculation interval (defaults to 5 seconds)
+const CURRENT_MINUTE_HISTORY_INTERVAL_SECONDS =
+	Number(process.env.CURRENT_MINUTE_HISTORY_INTERVAL_SECONDS) || 5;
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_123", {
 	apiVersion: "2025-04-30.basil",
@@ -533,8 +539,9 @@ export async function batchProcessLogs(): Promise<void> {
 			);
 
 			// Group logs by organization and api key to calculate total costs
-			const orgCosts = new Map<string, number>();
-			const apiKeyCosts = new Map<string, number>();
+			// Use Decimal.js to avoid floating point rounding errors
+			const orgCosts = new Map<string, Decimal>();
+			const apiKeyCosts = new Map<string, Decimal>();
 			const logIds: string[] = [];
 
 			for (const raw of unprocessedLogs.rows) {
@@ -564,13 +571,21 @@ export async function batchProcessLogs(): Promise<void> {
 
 				if (row.cost && row.cost > 0 && !row.cached) {
 					// Always update API key usage for non-cached logs with cost
-					const currentApiKeyCost = apiKeyCosts.get(row.api_key_id) || 0;
-					apiKeyCosts.set(row.api_key_id, currentApiKeyCost + row.cost);
+					const currentApiKeyCost =
+						apiKeyCosts.get(row.api_key_id) || new Decimal(0);
+					apiKeyCosts.set(
+						row.api_key_id,
+						currentApiKeyCost.plus(new Decimal(row.cost)),
+					);
 
 					// Only deduct organization credits when the log actually used credits
 					if (row.used_mode === "credits") {
-						const currentOrgCost = orgCosts.get(row.organization_id) || 0;
-						orgCosts.set(row.organization_id, currentOrgCost + row.cost);
+						const currentOrgCost =
+							orgCosts.get(row.organization_id) || new Decimal(0);
+						orgCosts.set(
+							row.organization_id,
+							currentOrgCost.plus(new Decimal(row.cost)),
+						);
 					}
 				}
 
@@ -579,31 +594,33 @@ export async function batchProcessLogs(): Promise<void> {
 
 			// Batch update organization credits within the same transaction
 			for (const [orgId, totalCost] of orgCosts.entries()) {
-				if (totalCost > 0) {
+				if (totalCost.greaterThan(0)) {
+					const costNumber = totalCost.toNumber();
 					await tx
 						.update(organization)
 						.set({
-							credits: sql`${organization.credits} - ${totalCost}`,
+							credits: sql`${organization.credits} - ${costNumber}`,
 						})
 						.where(eq(organization.id, orgId));
 
 					logger.info(
-						`Deducted ${totalCost} credits from organization ${orgId}`,
+						`Deducted ${costNumber} credits from organization ${orgId}`,
 					);
 				}
 			}
 
 			// Batch update API key usage within the same transaction
 			for (const [apiKeyId, totalCost] of apiKeyCosts.entries()) {
-				if (totalCost > 0) {
+				if (totalCost.greaterThan(0)) {
+					const costNumber = totalCost.toNumber();
 					await tx
 						.update(apiKey)
 						.set({
-							usage: sql`${apiKey.usage} + ${totalCost}`,
+							usage: sql`${apiKey.usage} + ${costNumber}`,
 						})
 						.where(eq(apiKey.id, apiKeyId));
 
-					logger.info(`Added ${totalCost} usage to API key ${apiKeyId}`);
+					logger.info(`Added ${costNumber} usage to API key ${apiKeyId}`);
 				}
 			}
 
@@ -677,6 +694,7 @@ export async function processLogQueue(): Promise<void> {
 let isWorkerRunning = false;
 let shouldStop = false;
 let minutelyIntervalId: NodeJS.Timeout | null = null;
+let currentMinuteIntervalId: NodeJS.Timeout | null = null;
 let aggregatedIntervalId: NodeJS.Timeout | null = null;
 let activeLoops = 0;
 let stopFailed = false;
@@ -873,6 +891,9 @@ export async function startWorker() {
 	logger.info("Starting statistics calculator...");
 	logger.info("- Minutely history: runs at the first second of every minute");
 	logger.info(
+		`- Current minute history: runs every ${CURRENT_MINUTE_HISTORY_INTERVAL_SECONDS} seconds for real-time metrics`,
+	);
+	logger.info(
 		"- Aggregated stats: runs every 5 minutes at minute boundaries (0, 5, 10, 15, etc.)",
 	);
 
@@ -921,6 +942,23 @@ export async function startWorker() {
 	};
 
 	scheduleMinutelyHistory();
+
+	// Start current minute history calculation (runs every N seconds for real-time metrics)
+	calculateCurrentMinuteHistory().catch((error) => {
+		logger.error(
+			"Error in initial current minute history calculation",
+			error instanceof Error ? error : new Error(String(error)),
+		);
+	});
+
+	currentMinuteIntervalId = setInterval(() => {
+		calculateCurrentMinuteHistory().catch((error) => {
+			logger.error(
+				"Error in interval current minute history calculation",
+				error instanceof Error ? error : new Error(String(error)),
+			);
+		});
+	}, CURRENT_MINUTE_HISTORY_INTERVAL_SECONDS * 1000);
 
 	// Start aggregated statistics calculation (runs every 5 minutes at minute boundaries)
 	calculateAggregatedStatistics().catch((error) => {
@@ -998,6 +1036,12 @@ export async function stopWorker(): Promise<boolean> {
 		clearInterval(minutelyIntervalId);
 		minutelyIntervalId = null;
 		logger.info("Minutely history calculator stopped");
+	}
+
+	if (currentMinuteIntervalId) {
+		clearInterval(currentMinuteIntervalId);
+		currentMinuteIntervalId = null;
+		logger.info("Current minute history calculator stopped");
 	}
 
 	if (aggregatedIntervalId) {

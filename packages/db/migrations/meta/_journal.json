@@ -477,6 +477,27 @@
       "when": 1763720390006,
       "tag": "1763720390_slimy_lucky_pierre",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "8",
+      "when": 1763803848710,
+      "tag": "1763803848_aromatic_northstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "8",
+      "when": 1763804758084,
+      "tag": "1763804758_pink_venom",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "8",
+      "when": 1763832260035,
+      "tag": "1763832260_jittery_abomination",
+      "breakpoints": true
     }
   ]
 }

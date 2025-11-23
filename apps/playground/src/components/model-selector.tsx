@@ -107,6 +107,56 @@ function isModelUnstable(
 	);
 }
 
+type PriceField = "input" | "output" | "cachedInput";
+
+interface MappingPriceInfo {
+	label: string;
+	original?: string;
+	discounted?: string;
+}
+
+// Helper to format prices using any provider discount while reusing shared formatPrice logic.
+function getMappingPriceInfo(
+	mapping: ProviderModelMapping | undefined,
+	field: PriceField,
+): MappingPriceInfo {
+	if (!mapping) {
+		return { label: "Unknown" };
+	}
+
+	let basePrice: number | undefined;
+	if (field === "input") {
+		basePrice = mapping.inputPrice;
+	} else if (field === "output") {
+		basePrice = mapping.outputPrice;
+	} else {
+		basePrice = mapping.cachedInputPrice;
+	}
+
+	if (basePrice === undefined) {
+		return { label: "Unknown" };
+	}
+
+	// Free models
+	if (basePrice === 0) {
+		return { label: "Free", original: "Free" };
+	}
+
+	const original = formatPrice(basePrice);
+
+	// Apply discount if present
+	if (mapping.discount && mapping.discount > 0) {
+		const discounted = formatPrice(basePrice * (1 - mapping.discount));
+		return {
+			label: discounted,
+			original,
+			discounted,
+		};
+	}
+
+	return { label: original, original };
+}
+
 // Removed old ModelItem; we render entries per provider below
 
 export function ModelSelector({
@@ -895,7 +945,29 @@ export function ModelSelector({
 																Input
 															</span>
 															<p className="text-xs font-mono">
-																{formatPrice(previewEntry.mapping?.inputPrice)}
+																{(() => {
+																	const price = getMappingPriceInfo(
+																		previewEntry.mapping,
+																		"input",
+																	);
+																	if (
+																		price.original &&
+																		price.discounted &&
+																		price.original !== price.discounted
+																	) {
+																		return (
+																			<>
+																				<span className="line-through text-muted-foreground">
+																					{price.original}
+																				</span>{" "}
+																				<span className="text-green-500">
+																					{price.discounted}
+																				</span>
+																			</>
+																		);
+																	}
+																	return price.label;
+																})()}
 															</p>
 														</div>
 														<div className="space-y-1">
@@ -903,7 +975,29 @@ export function ModelSelector({
 																Output
 															</span>
 															<p className="text-xs font-mono">
-																{formatPrice(previewEntry.mapping?.outputPrice)}
+																{(() => {
+																	const price = getMappingPriceInfo(
+																		previewEntry.mapping,
+																		"output",
+																	);
+																	if (
+																		price.original &&
+																		price.discounted &&
+																		price.original !== price.discounted
+																	) {
+																		return (
+																			<>
+																				<span className="line-through text-muted-foreground">
+																					{price.original}
+																				</span>{" "}
+																				<span className="text-green-500">
+																					{price.discounted}
+																				</span>
+																			</>
+																		);
+																	}
+																	return price.label;
+																})()}
 															</p>
 														</div>
 														<div className="space-y-1">
@@ -934,9 +1028,29 @@ export function ModelSelector({
 																	Cached Input
 																</span>
 																<p className="text-xs font-mono text-green-600 dark:text-green-400">
-																	{formatPrice(
-																		previewEntry.mapping.cachedInputPrice,
-																	)}
+																	{(() => {
+																		const price = getMappingPriceInfo(
+																			previewEntry.mapping,
+																			"cachedInput",
+																		);
+																		if (
+																			price.original &&
+																			price.discounted &&
+																			price.original !== price.discounted
+																		) {
+																			return (
+																				<>
+																					<span className="line-through text-muted-foreground">
+																						{price.original}
+																					</span>{" "}
+																					<span className="text-green-500">
+																						{price.discounted}
+																					</span>
+																				</>
+																			);
+																		}
+																		return price.label;
+																	})()}
 																</p>
 															</div>
 														</div>
@@ -1063,7 +1177,29 @@ export function ModelSelector({
 														Input
 													</span>
 													<p className="text-sm font-mono">
-														{formatPrice(selectedDetails.mapping?.inputPrice)}
+														{(() => {
+															const price = getMappingPriceInfo(
+																selectedDetails.mapping,
+																"input",
+															);
+															if (
+																price.original &&
+																price.discounted &&
+																price.original !== price.discounted
+															) {
+																return (
+																	<>
+																		<span className="line-through text-muted-foreground">
+																			{price.original}
+																		</span>{" "}
+																		<span className="text-green-500">
+																			{price.discounted}
+																		</span>
+																	</>
+																);
+															}
+															return price.label;
+														})()}
 													</p>
 												</div>
 												<div className="space-y-1">
@@ -1071,7 +1207,29 @@ export function ModelSelector({
 														Output
 													</span>
 													<p className="text-sm font-mono">
-														{formatPrice(selectedDetails.mapping?.outputPrice)}
+														{(() => {
+															const price = getMappingPriceInfo(
+																selectedDetails.mapping,
+																"output",
+															);
+															if (
+																price.original &&
+																price.discounted &&
+																price.original !== price.discounted
+															) {
+																return (
+																	<>
+																		<span className="line-through text-muted-foreground">
+																			{price.original}
+																		</span>{" "}
+																		<span className="text-green-500">
+																			{price.discounted}
+																		</span>
+																	</>
+																);
+															}
+															return price.label;
+														})()}
 													</p>
 												</div>
 												<div className="space-y-1">
@@ -1102,9 +1260,29 @@ export function ModelSelector({
 															Cached Input
 														</span>
 														<p className="text-sm font-mono text-green-600 dark:text-green-400">
-															{formatPrice(
-																selectedDetails.mapping.cachedInputPrice,
-															)}
+															{(() => {
+																const price = getMappingPriceInfo(
+																	selectedDetails.mapping,
+																	"cachedInput",
+																);
+																if (
+																	price.original &&
+																	price.discounted &&
+																	price.original !== price.discounted
+																) {
+																	return (
+																		<>
+																			<span className="line-through text-muted-foreground">
+																				{price.original}
+																			</span>{" "}
+																			<span className="text-green-500">
+																				{price.discounted}
+																			</span>
+																		</>
+																	);
+																}
+																return price.label;
+															})()}
 														</p>
 													</div>
 												</div>

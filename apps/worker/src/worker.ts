@@ -71,6 +71,12 @@ const schema = z.object({
 	used_provider: z.string(),
 	response_size: z.number(),
 	hasError: z.boolean().nullable(),
+	data_storage_cost: z.string().nullable(),
+	prompt_tokens: z.string().nullable(),
+	completion_tokens: z.string().nullable(),
+	total_tokens: z.string().nullable(),
+	reasoning_tokens: z.string().nullable(),
+	cached_tokens: z.string().nullable(),
 });
 
 export async function acquireLock(key: string): Promise<boolean> {
@@ -337,7 +343,7 @@ export async function cleanupExpiredLogData(): Promise<void> {
 
 		// Define retention periods in days
 		const FREE_PLAN_RETENTION_DAYS = 3;
-		const PRO_PLAN_RETENTION_DAYS = 7;
+		const PRO_PLAN_RETENTION_DAYS = 30;
 		const CLEANUP_BATCH_SIZE = 10000;
 
 		const now = new Date();
@@ -536,6 +542,12 @@ export async function batchProcessLogs(): Promise<void> {
 					used_provider: log.usedProvider,
 					response_size: log.responseSize,
 					hasError: log.hasError,
+					data_storage_cost: log.dataStorageCost,
+					prompt_tokens: log.promptTokens,
+					completion_tokens: log.completionTokens,
+					total_tokens: log.totalTokens,
+					reasoning_tokens: log.reasoningTokens,
+					cached_tokens: log.cachedTokens,
 				})
 				.from(log)
 				.leftJoin(tables.project, eq(tables.project.id, log.projectId))
@@ -583,6 +595,11 @@ export async function batchProcessLogs(): Promise<void> {
 					usedModelMapping: row.used_model_mapping,
 					usedProvider: row.used_provider,
 					responseSize: row.response_size,
+					promptTokens: row.prompt_tokens,
+					completionTokens: row.completion_tokens,
+					totalTokens: row.total_tokens,
+					reasoningTokens: row.reasoning_tokens,
+					cachedTokens: row.cached_tokens,
 				});
 
 				if (row.cost && row.cost > 0 && !row.cached) {
@@ -594,14 +611,28 @@ export async function batchProcessLogs(): Promise<void> {
 						currentApiKeyCost.plus(new Decimal(row.cost)),
 					);
 
-					// Only deduct organization credits when the log actually used credits
+					// Deduct organization credits based on mode:
+					// - Credits mode: deduct full cost (includes request cost + storage cost)
+					// - API keys mode: only deduct storage cost (data retention billing)
 					if (row.used_mode === "credits") {
+						// In credits mode, deduct the full cost
 						const currentOrgCost =
 							orgCosts.get(row.organization_id) || new Decimal(0);
 						orgCosts.set(
 							row.organization_id,
 							currentOrgCost.plus(new Decimal(row.cost)),
 						);
+					} else if (row.used_mode === "api-keys" && row.data_storage_cost) {
+						// In API keys mode, only deduct storage cost for data retention
+						const storageCost = new Decimal(row.data_storage_cost);
+						if (storageCost.greaterThan(0)) {
+							const currentOrgCost =
+								orgCosts.get(row.organization_id) || new Decimal(0);
+							orgCosts.set(
+								row.organization_id,
+								currentOrgCost.plus(storageCost),
+							);
+						}
 					}
 				}
 

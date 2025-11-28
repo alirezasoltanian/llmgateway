@@ -222,16 +222,24 @@ export default function ChatPageClient({
 			const imageConfig =
 				supportsImageGen && (imageAspectRatio !== "auto" || imageSize !== "1K")
 					? {
-							aspect_ratio: imageAspectRatio,
-							image_size: imageSize,
+							...(imageAspectRatio !== "auto" && {
+								aspect_ratio: imageAspectRatio,
+							}),
+							...(imageSize !== "1K" && { image_size: imageSize }),
 						}
 					: undefined;
+
+			// Hidden feature: check localStorage for no-fallback setting
+			const noFallback =
+				typeof window !== "undefined" &&
+				localStorage.getItem("llmgateway_no_fallback") === "true";
 
 			const mergedOptions = {
 				...options,
 				headers: {
 					...(options?.headers || {}),
 					...(githubToken ? { "x-github-token": githubToken } : {}),
+					...(noFallback ? { "x-no-fallback": "true" } : {}),
 				},
 				body: {
 					...(options?.body || {}),

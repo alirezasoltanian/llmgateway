@@ -9,6 +9,7 @@ import {
 	ChevronUp,
 	Clock,
 	Coins,
+	Info,
 	Package,
 	Link as LinkIcon,
 	Zap,
@@ -28,6 +29,12 @@ import {
 import type { Log } from "@llmgateway/db";
 
 export function LogCard({ log }: { log: Partial<Log> }) {
+	// Determine if retention was enabled based on dataStorageCost
+	// If dataStorageCost is 0 or null/undefined, retention was disabled
+	const retentionEnabled =
+		log.dataStorageCost !== null &&
+		log.dataStorageCost !== undefined &&
+		Number(log.dataStorageCost) > 0;
 	const [isExpanded, setIsExpanded] = useState(false);
 
 	const formattedTime = formatDistanceToNow(new Date(log?.createdAt ?? ""), {
@@ -44,6 +51,35 @@ export function LogCard({ log }: { log: Partial<Log> }) {
 			return `${ms}ms`;
 		}
 		return `${(ms / 1000).toFixed(2)}s`;
+	};
+
+	// Recursively render params object
+	const renderParams = (
+		obj: Record<string, any>,
+		depth = 0,
+	): React.ReactNode => {
+		return Object.entries(obj).flatMap(([key, value]) => {
+			if (value === null || value === undefined) {
+				return [];
+			}
+
+			// If it's an object, render its children directly without showing the parent key
+			if (typeof value === "object" && !Array.isArray(value)) {
+				return renderParams(value, depth + 1);
+			}
+
+			// Format the key for display
+			const formattedKey = key
+				.replace(/_/g, " ")
+				.replace(/\b\w/g, (l) => l.toUpperCase());
+
+			return [
+				<div key={key} className="contents">
+					<div className="text-muted-foreground">{formattedKey}</div>
+					<div>{Array.isArray(value) ? value.join(", ") : String(value)}</div>
+				</div>,
+			];
+		});
 	};
 
 	// Determine status icon and color based on error status or unified finish reason
@@ -78,18 +114,34 @@ export function LogCard({ log }: { log: Partial<Log> }) {
 				</div>
 				<div className="flex-1 space-y-1 min-w-0">
 					<div className="flex items-start justify-between gap-4">
-						<p className="font-medium break-words max-w-none line-clamp-2">
-							{log.content ||
-								(log.unifiedFinishReason === "tool_calls" && log.toolResults ? (
-									Array.isArray(log.toolResults) ? (
-										`Tool calls: ${log.toolResults.map((tr) => tr.function?.name || "unknown").join(", ")}`
-									) : (
-										"Tool calls executed"
-									)
-								) : (
-									<i className="italic">–</i>
-								))}
-						</p>
+						<div className="flex items-center gap-2 flex-1 min-w-0">
+							<p className="font-medium break-words max-w-none line-clamp-2">
+								{log.content ||
+									(log.unifiedFinishReason === "tool_calls" && log.toolResults
+										? Array.isArray(log.toolResults)
+											? `Tool calls: ${log.toolResults.map((tr) => tr.function?.name || "unknown").join(", ")}`
+											: "Tool calls executed"
+										: "---")}
+							</p>
+							{!log.content &&
+								log.unifiedFinishReason !== "tool_calls" &&
+								!log.hasError &&
+								!retentionEnabled && (
+									<TooltipProvider>
+										<Tooltip>
+											<TooltipTrigger asChild>
+												<Info className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+											</TooltipTrigger>
+											<TooltipContent>
+												<p>
+													Enable retention in organization policies to store
+													response content
+												</p>
+											</TooltipContent>
+										</Tooltip>
+									</TooltipProvider>
+								)}
+						</div>
 						<Badge
 							variant={
 								log.hasError
@@ -249,6 +301,17 @@ export function LogCard({ log }: { log: Partial<Log> }) {
 																			{score.latency?.toFixed(0)}ms
 																		</span>
 																	)}
+																	{score.price !== undefined && (
+																		<span className="ml-2">
+																			${score.price.toFixed(6)}
+																		</span>
+																	)}
+																	{score.priority !== undefined &&
+																		score.priority !== 1 && (
+																			<span className="ml-2">
+																				p:{score.priority}
+																			</span>
+																		)}
 																</span>
 															</div>
 														))}
@@ -380,7 +443,7 @@ export function LogCard({ log }: { log: Partial<Log> }) {
 								<div>
 									{log.requestCost ? `$${log.requestCost.toFixed(8)}` : "$0"}
 								</div>
-								<div className="text-muted-foreground">Total Cost</div>
+								<div className="text-muted-foreground">Inference Total</div>
 								<div className="font-medium">
 									{log.cost ? `$${log.cost.toFixed(8)}` : "$0"}
 								</div>
@@ -400,6 +463,15 @@ export function LogCard({ log }: { log: Partial<Log> }) {
 										<div>{log.pricingTier}</div>
 									</>
 								)}
+								<div className="text-muted-foreground col-span-2 border-t pt-2 mt-1 text-xs">
+									LLM Gateway Costs
+								</div>
+								<div className="text-muted-foreground">Data Storage</div>
+								<div>
+									{log.dataStorageCost
+										? `$${Number(log.dataStorageCost).toFixed(8)}`
+										: "$0"}
+								</div>
 							</div>
 						</div>
 						<div className="space-y-2">
@@ -536,6 +608,22 @@ export function LogCard({ log }: { log: Partial<Log> }) {
 									</Tooltip>
 									<span>{log.reasoningEffort || "-"}</span>
 								</div>
+								{log.effort && (
+									<div className="flex items-center justify-between gap-2">
+										<Tooltip>
+											<TooltipTrigger asChild>
+												<span className="text-muted-foreground">Effort</span>
+											</TooltipTrigger>
+											<TooltipContent>
+												<p className="max-w-xs text-xs">
+													Controls the computational effort for supported models
+													(e.g., claude-opus-4-5)
+												</p>
+											</TooltipContent>
+										</Tooltip>
+										<span>{log.effort}</span>
+									</div>
+								)}
 								<div className="flex items-center justify-between gap-2">
 									<Tooltip>
 										<TooltipTrigger asChild>
@@ -561,6 +649,14 @@ export function LogCard({ log }: { log: Partial<Log> }) {
 							</TooltipProvider>
 						</div>
 					</div>
+					{log.params && Object.keys(log.params).length > 0 && (
+						<div className="space-y-2">
+							<h4 className="text-sm font-medium">Additional Parameters</h4>
+							<div className="grid grid-cols-2 gap-2 rounded-md border p-3 text-sm">
+								{renderParams(log.params)}
+							</div>
+						</div>
+					)}
 					{(log.tools || log.toolChoice || log.toolResults) && (
 						<div className="space-y-2">
 							<h4 className="text-sm font-medium">Tool Information</h4>
@@ -664,9 +760,20 @@ export function LogCard({ log }: { log: Partial<Log> }) {
 					<div className="space-y-2">
 						<h4 className="text-sm font-medium">Message Context</h4>
 						<div className="rounded-md border p-3">
-							<pre className="max-h-60 text-xs overflow-auto whitespace-pre-wrap break-words">
-								{log.messages ? JSON.stringify(log.messages, null, 2) : "–"}
-							</pre>
+							{log.messages ? (
+								<pre className="max-h-60 text-xs overflow-auto whitespace-pre-wrap break-words">
+									{JSON.stringify(log.messages, null, 2)}
+								</pre>
+							) : !retentionEnabled ? (
+								<p className="text-sm text-muted-foreground italic">
+									Message data not retained. Enable retention in organization
+									policies to store request messages.
+								</p>
+							) : (
+								<p className="text-sm text-muted-foreground italic">
+									No message data available.
+								</p>
+							)}
 						</div>
 						{!!log.responseFormat && (
 							<div className="mt-3">
@@ -694,9 +801,20 @@ export function LogCard({ log }: { log: Partial<Log> }) {
 					<div className="space-y-2">
 						<h4 className="text-sm font-medium">Response</h4>
 						<div className="rounded-md border p-3">
-							<pre className="max-h-60 text-xs overflow-auto whitespace-pre-wrap break-words">
-								{log.content || "–"}
-							</pre>
+							{log.content ? (
+								<pre className="max-h-60 text-xs overflow-auto whitespace-pre-wrap break-words">
+									{log.content}
+								</pre>
+							) : !retentionEnabled ? (
+								<p className="text-sm text-muted-foreground italic">
+									Response content not retained. Enable retention in
+									organization policies to store response data.
+								</p>
+							) : (
+								<p className="text-sm text-muted-foreground italic">
+									No response content available.
+								</p>
+							)}
 						</div>
 					</div>
 				</div>

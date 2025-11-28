@@ -12,7 +12,6 @@ import { nousresearchModels } from "./models/nousresearch.js";
 import { openaiModels } from "./models/openai.js";
 import { perplexityModels } from "./models/perplexity.js";
 import { routewayModels } from "./models/routeway.js";
-import { sherlockModels } from "./models/sherlock.js";
 import { xaiModels } from "./models/xai.js";
 import { zaiModels } from "./models/zai.js";
 
@@ -211,6 +210,14 @@ export interface ModelDefinition {
 	 * Description of the model
 	 */
 	description?: string;
+	/**
+	 * Date when the model was released by the provider
+	 */
+	releasedAt?: Date;
+	/**
+	 * Date when the model was published on LLM Gateway
+	 */
+	publishedAt?: Date;
 }
 
 export const models = [
@@ -229,6 +236,5 @@ export const models = [
 	...alibabaModels,
 	...nousresearchModels,
 	...routewayModels,
-	...sherlockModels,
 	...zaiModels,
 ] as const satisfies ModelDefinition[];

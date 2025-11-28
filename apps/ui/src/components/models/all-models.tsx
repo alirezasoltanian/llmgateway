@@ -23,12 +23,14 @@ import {
 	Percent,
 	Scale,
 	Braces,
+	FileJson2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 
 import Footer from "@/components/landing/footer";
+import { ModelCodeExampleDialog } from "@/components/models/model-code-example-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Badge } from "@/lib/components/badge";
 import { Button } from "@/lib/components/button";
@@ -127,6 +129,7 @@ export function AllModels({ children }: { children: React.ReactNode }) {
 			tools: searchParams.get("tools") === "true",
 			reasoning: searchParams.get("reasoning") === "true",
 			jsonOutput: searchParams.get("jsonOutput") === "true",
+			jsonOutputSchema: searchParams.get("jsonOutputSchema") === "true",
 			imageGeneration: searchParams.get("imageGeneration") === "true",
 			free: searchParams.get("free") === "true",
 			discounted: searchParams.get("discounted") === "true",
@@ -188,7 +191,7 @@ export function AllModels({ children }: { children: React.ReactNode }) {
 					.trim()
 					.toLowerCase()
 					.split(/\s+/)
-					.map((t) => t.replace(/[^a-z0-9]/g, ""))
+					.map((t: string) => t.replace(/[^a-z0-9]/g, ""))
 					.filter(Boolean);
 
 				const providerStrings = (model.providerDetails || []).flatMap((p) => [
@@ -205,7 +208,7 @@ export function AllModels({ children }: { children: React.ReactNode }) {
 				const haystack = normalize(haystackParts.join(" "));
 				const normalizedQuery = normalize(searchQuery);
 
-				const containsAllTokens = queryTokens.every((t) =>
+				const containsAllTokens = queryTokens.every((t: string) =>
 					haystack.includes(t),
 				);
 				const containsPhrase = normalizedQuery
@@ -245,6 +248,12 @@ export function AllModels({ children }: { children: React.ReactNode }) {
 			if (
 				filters.capabilities.jsonOutput &&
 				!model.providerDetails.some((p) => p.provider.jsonOutput)
+			) {
+				return false;
+			}
+			if (
+				filters.capabilities.jsonOutputSchema &&
+				!model.providerDetails.some((p) => p.provider.jsonOutputSchema)
 			) {
 				return false;
 			}
@@ -560,6 +569,13 @@ export function AllModels({ children }: { children: React.ReactNode }) {
 				color: "text-cyan-500",
 			});
 		}
+		if (provider.jsonOutputSchema) {
+			capabilities.push({
+				icon: FileJson2,
+				label: "Structured JSON Output",
+				color: "text-teal-500",
+			});
+		}
 		if (model?.output?.includes("image")) {
 			capabilities.push({
 				icon: ImagePlus,
@@ -579,6 +595,7 @@ export function AllModels({ children }: { children: React.ReactNode }) {
 				tools: false,
 				reasoning: false,
 				jsonOutput: false,
+				jsonOutputSchema: false,
 				imageGeneration: false,
 				free: false,
 				discounted: false,
@@ -598,6 +615,7 @@ export function AllModels({ children }: { children: React.ReactNode }) {
 			tools: undefined,
 			reasoning: undefined,
 			jsonOutput: undefined,
+			jsonOutputSchema: undefined,
 			free: undefined,
 			discounted: undefined,
 			provider: undefined,
@@ -663,6 +681,12 @@ export function AllModels({ children }: { children: React.ReactNode }) {
 									label: "JSON Output",
 									icon: Braces,
 									color: "text-cyan-500",
+								},
+								{
+									key: "jsonOutputSchema",
+									label: "Structured JSON Output",
+									icon: FileJson2,
+									color: "text-teal-500",
 								},
 								{
 									key: "imageGeneration",
@@ -970,22 +994,30 @@ export function AllModels({ children }: { children: React.ReactNode }) {
 											<code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[150px]">
 												{model.id}
 											</code>
-											<Button
-												variant="ghost"
-												size="sm"
-												className="h-5 w-5 p-0"
-												onClick={(e) => {
-													e.stopPropagation();
-													copyToClipboard(model.id);
-												}}
-												title="Copy model ID"
-											>
-												{copiedModel === model.id ? (
-													<Check className="h-3 w-3 text-green-600" />
-												) : (
-													<Copy className="h-3 w-3" />
-												)}
-											</Button>
+											<div className="flex items-center gap-1">
+												<Button
+													variant="ghost"
+													size="sm"
+													className="h-5 w-5 p-0"
+													onClick={(e) => {
+														e.stopPropagation();
+														copyToClipboard(model.id);
+													}}
+													title="Copy root model ID"
+												>
+													{copiedModel === model.id ? (
+														<Check className="h-3 w-3 text-green-600" />
+													) : (
+														<Copy className="h-3 w-3" />
+													)}
+												</Button>
+												<div
+													onClick={(e) => e.stopPropagation()}
+													onMouseDown={(e) => e.stopPropagation()}
+												>
+													<ModelCodeExampleDialog modelId={model.id} />
+												</div>
+											</div>
 										</div>
 									</div>
 								</TableCell>

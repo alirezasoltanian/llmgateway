@@ -1,13 +1,6 @@
 "use client";
 import { useSearchParams } from "next/navigation";
-import {
-	Cell,
-	Legend,
-	Pie,
-	PieChart,
-	ResponsiveContainer,
-	Tooltip,
-} from "recharts";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 import { useDashboardState } from "@/lib/dashboard-state";
 import { useApi } from "@/lib/fetch-client";
@@ -117,12 +110,14 @@ export function CostBreakdownChart({
 	}
 
 	const providerCosts = new Map<string, number>();
+	let totalStorageCost = 0;
 
 	data.activity.forEach((day) => {
 		day.modelBreakdown.forEach((model) => {
 			const currentCost = providerCosts.get(model.provider) || 0;
 			providerCosts.set(model.provider, currentCost + model.cost);
 		});
+		totalStorageCost += Number(day.dataStorageCost) || 0;
 	});
 
 	const chartData = Array.from(providerCosts.entries())
@@ -132,6 +127,15 @@ export function CostBreakdownChart({
 			color: getProviderColor(provider),
 		}))
 		.sort((a, b) => b.value - a.value);
+
+	// Add storage cost as a separate item if it exists
+	if (totalStorageCost > 0) {
+		chartData.push({
+			name: "LLM Gateway Storage",
+			value: totalStorageCost,
+			color: "#6366f1", // Indigo color for storage
+		});
+	}
 
 	function getProviderColor(providerName: string) {
 		// Find the provider in the providers array by name (case-insensitive)
@@ -157,8 +161,8 @@ export function CostBreakdownChart({
 						outerRadius={100}
 						paddingAngle={2}
 						dataKey="value"
-						label={({ name, percent }) =>
-							`${name} ${((percent as number) * 100).toFixed(0)}%`
+						label={({ name, percent }: { name?: string; percent?: number }) =>
+							`${name ?? ""} ${((percent ?? 0) * 100).toFixed(0)}%`
 						}
 						labelLine={false}
 					>
@@ -169,7 +173,6 @@ export function CostBreakdownChart({
 					<Tooltip
 						content={<CustomTooltip payload={[{ value: 0 }]} label="test" />}
 					/>
-					<Legend />
 				</PieChart>
 			</ResponsiveContainer>
 			<div className="text-center mt-4">

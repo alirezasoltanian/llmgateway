@@ -138,6 +138,8 @@ export interface paths {
                         /** Format: date-time */
                         timestamp: string;
                         version: string;
+                        /** @default [] */
+                        providers?: string[];
                     };
                 };
             };
@@ -758,10 +760,12 @@ export interface paths {
                                 inputCost: number;
                                 outputCost: number;
                                 requestCost: number;
+                                dataStorageCost: number;
                                 errorCount: number;
                                 errorRate: number;
                                 cacheCount: number;
                                 cacheRate: number;
+                                discountSavings: number;
                                 modelBreakdown: {
                                     id: string;
                                     provider: string;
@@ -2572,6 +2576,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         amount: number;
+                        promoCode?: string;
                     };
                 };
             };
@@ -2781,6 +2786,7 @@ export interface paths {
                     "application/json": {
                         amount: number;
                         paymentMethodId: string;
+                        promoCode?: string;
                     };
                 };
             };
@@ -2825,6 +2831,7 @@ export interface paths {
                     "application/json": {
                         amount: number;
                         paymentMethodId?: string;
+                        promoCode?: string;
                     };
                 };
             };
@@ -2842,6 +2849,14 @@ export interface paths {
                             planFee: number;
                             totalFees: number;
                             totalAmount: number;
+                            bonusAmount?: number;
+                            finalCreditAmount?: number;
+                            bonusEnabled: boolean;
+                            bonusEligible: boolean;
+                            bonusIneligibilityReason?: string;
+                            promoCodeApplied?: string;
+                            promoDiscountAmount?: number;
+                            totalAmountBeforePromo: number;
                         };
                     };
                 };

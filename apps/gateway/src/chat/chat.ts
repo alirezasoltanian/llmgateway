@@ -4,9 +4,10 @@ import { HTTPException } from "hono/http-exception";
 import { streamSSE } from "hono/streaming";
 
 import { validateSource } from "@/chat/tools/validate-source.js";
+import { reportKeyError, reportKeySuccess } from "@/lib/api-key-health.js";
 import { calculateCosts } from "@/lib/costs.js";
 import { throwIamException, validateModelAccess } from "@/lib/iam.js";
-import { insertLog } from "@/lib/logs.js";
+import { calculateDataStorageCost, insertLog } from "@/lib/logs.js";
 
 import {
 	generateCacheKey,
@@ -223,6 +224,16 @@ const completionsRequestSchema = z.object({
 			description: "Controls the reasoning effort for reasoning-capable models",
 			example: "medium",
 		}),
+	effort: z
+		.enum(["low", "medium", "high"])
+		.nullable()
+		.optional()
+		.transform((val) => (val === null ? undefined : val))
+		.openapi({
+			description:
+				"Controls the computational effort for supported models (currently only claude-opus-4-5-20251101)",
+			example: "medium",
+		}),
 	free_models_only: z.boolean().optional().default(false).openapi({
 		description:
 			"When used with auto routing, only route to free models (models with zero input and output pricing)",
@@ -320,6 +331,12 @@ const completions = createRoute({
 									cached_tokens: z.number(),
 								})
 								.optional(),
+							cost_usd_total: z.number().nullable().optional(),
+							cost_usd_input: z.number().nullable().optional(),
+							cost_usd_output: z.number().nullable().optional(),
+							cost_usd_cached_input: z.number().nullable().optional(),
+							info: z.string().optional(),
+							cost_usd_request: z.number().nullable().optional(),
 						}),
 						metadata: z.object({
 							requested_model: z.string(),
@@ -411,6 +428,7 @@ chat.openapi(completions, async (c) => {
 		no_reasoning,
 		sensitive_word_check,
 		image_config,
+		effort,
 	} = validationResult.data;
 
 	// Extract reasoning_effort as mutable variable for auto-routing modification
@@ -441,6 +459,11 @@ chat.openapi(completions, async (c) => {
 
 	// Extract custom X-LLMGateway-* headers
 	const customHeaders = extractCustomHeaders(c);
+
+	// Check for X-No-Fallback header to disable provider fallback on low uptime
+	const noFallback =
+		c.req.raw.headers.get("x-no-fallback") === "true" ||
+		c.req.raw.headers.get("X-No-Fallback") === "true";
 
 	// Store the original llmgateway model ID for logging purposes
 	const initialRequestedModel = modelInput;
@@ -771,6 +794,9 @@ chat.openapi(completions, async (c) => {
 		},
 	});
 
+	// Extract retention level for data storage cost calculation
+	const retentionLevel = organization?.retentionLevel ?? "none";
+
 	// Get image size limits from environment variables or use defaults
 	const freeLimitMB = Number(process.env.IMAGE_SIZE_LIMIT_FREE_MB) || 10;
 	const proLimitMB = Number(process.env.IMAGE_SIZE_LIMIT_PRO_MB) || 100;
@@ -1043,13 +1069,16 @@ chat.openapi(completions, async (c) => {
 				const cheapestResult = getCheapestFromAvailableProviders(
 					finalProviders,
 					selectedModel,
-					metricsMap,
+					{ metricsMap, isStreaming: stream },
 				);
 
 				if (cheapestResult) {
 					usedProvider = cheapestResult.provider.providerId;
 					usedModel = cheapestResult.provider.modelName;
-					routingMetadata = cheapestResult.metadata;
+					routingMetadata = {
+						...cheapestResult.metadata,
+						...(noFallback ? { noFallback: true } : {}),
+					};
 				} else {
 					// Fallback to first available provider if price comparison fails
 					usedProvider = finalProviders[0].providerId;
@@ -1092,7 +1121,137 @@ chat.openapi(completions, async (c) => {
 	) {
 		usedProvider = "llmgateway";
 		usedModel = "custom";
-	} else if (!usedProvider) {
+	}
+
+	// Check uptime for specifically requested providers (not llmgateway or custom)
+	// If uptime is below 80%, route to an alternative provider instead
+	// Skip this fallback if X-No-Fallback header is set
+	if (
+		!noFallback &&
+		usedProvider &&
+		requestedProvider &&
+		requestedProvider !== "llmgateway" &&
+		requestedProvider !== "custom"
+	) {
+		// Find the base model ID for metrics lookup
+		// Since custom providers are excluded above, modelInfo always has 'id'
+		const baseModelId = (modelInfo as ModelDefinition).id;
+
+		// Fetch uptime metrics for the requested provider
+		const metricsMap = await getProviderMetricsForCombinations(
+			[{ modelId: baseModelId, providerId: usedProvider }],
+			5,
+		);
+
+		const metrics = metricsMap.get(`${baseModelId}:${usedProvider}`);
+
+		// If we have metrics and uptime is below 90%, route to an alternative
+		if (metrics && metrics.uptime < 90) {
+			// Get available providers for routing
+			const providerIds = modelInfo.providers
+				.filter((p) => p.providerId !== usedProvider) // Exclude the low-uptime provider
+				.map((p) => p.providerId);
+
+			if (providerIds.length > 0) {
+				const providerKeys = await db.query.providerKey.findMany({
+					where: {
+						status: { eq: "active" },
+						organizationId: { eq: project.organizationId },
+						provider: { in: providerIds },
+					},
+				});
+
+				const availableProviders =
+					project.mode === "api-keys"
+						? providerKeys.map((key) => key.provider)
+						: providers
+								.filter((p) => p.id !== "llmgateway" && p.id !== usedProvider)
+								.filter((p) => hasProviderEnvironmentToken(p.id as Provider))
+								.map((p) => p.id);
+
+				// Filter model providers to only those available (excluding the low-uptime one)
+				const availableModelProviders = modelInfo.providers.filter(
+					(provider) =>
+						availableProviders.includes(provider.providerId) &&
+						provider.providerId !== usedProvider,
+				);
+
+				if (availableModelProviders.length > 0) {
+					const modelWithPricing = models.find((m) => m.id === baseModelId);
+
+					if (modelWithPricing) {
+						// Fetch metrics for all available providers
+						const metricsCombinations = availableModelProviders.map((p) => ({
+							modelId: modelWithPricing.id,
+							providerId: p.providerId,
+						}));
+						const allMetricsMap = await getProviderMetricsForCombinations(
+							metricsCombinations,
+							5,
+						);
+
+						const cheapestResult = getCheapestFromAvailableProviders(
+							availableModelProviders,
+							modelWithPricing,
+							{ metricsMap: allMetricsMap, isStreaming: stream },
+						);
+
+						// Get price info for the original requested provider to include in scores
+						const originalProviderInfo = modelInfo.providers.find(
+							(p) => p.providerId === requestedProvider,
+						);
+						const originalProviderPrice = originalProviderInfo
+							? (originalProviderInfo.inputPrice ?? 0) +
+								(originalProviderInfo.outputPrice ?? 0)
+							: 0;
+
+						// Create score entry for the original requested provider
+						const originalProviderScore = {
+							providerId: requestedProvider,
+							score: -1, // Negative score indicates this provider was skipped due to low uptime
+							price: originalProviderPrice,
+							uptime: metrics.uptime,
+							latency: metrics.averageLatency,
+							throughput: metrics.throughput,
+						};
+
+						if (cheapestResult) {
+							usedProvider = cheapestResult.provider.providerId;
+							usedModel = cheapestResult.provider.modelName;
+							routingMetadata = {
+								...cheapestResult.metadata,
+								selectionReason: "low-uptime-fallback",
+								originalProvider: requestedProvider,
+								originalProviderUptime: metrics.uptime,
+								// Add the original provider's score to the scores array
+								providerScores: [
+									originalProviderScore,
+									...cheapestResult.metadata.providerScores,
+								],
+							};
+						} else {
+							// Use first available provider as fallback
+							usedProvider = availableModelProviders[0].providerId;
+							usedModel = availableModelProviders[0].modelName;
+							routingMetadata = {
+								availableProviders: availableModelProviders.map(
+									(p) => p.providerId,
+								),
+								selectedProvider: usedProvider,
+								selectionReason: "low-uptime-fallback",
+								providerScores: [originalProviderScore],
+								originalProvider: requestedProvider,
+								originalProviderUptime: metrics.uptime,
+							};
+						}
+					}
+				}
+			}
+			// If no alternative providers available, continue with the requested one
+		}
+	}
+
+	if (!usedProvider) {
 		if (modelInfo.providers.length === 1) {
 			usedProvider = modelInfo.providers[0].providerId;
 			usedModel = modelInfo.providers[0].modelName;
@@ -1150,13 +1309,16 @@ chat.openapi(completions, async (c) => {
 				const cheapestResult = getCheapestFromAvailableProviders(
 					availableModelProviders,
 					modelWithPricing,
-					metricsMap,
+					{ metricsMap, isStreaming: stream },
 				);
 
 				if (cheapestResult) {
 					usedProvider = cheapestResult.provider.providerId;
 					usedModel = cheapestResult.provider.modelName;
-					routingMetadata = cheapestResult.metadata;
+					routingMetadata = {
+						...cheapestResult.metadata,
+						...(noFallback ? { noFallback: true } : {}),
+					};
 				} else {
 					usedProvider = availableModelProviders[0].providerId;
 					usedModel = availableModelProviders[0].modelName;
@@ -1195,6 +1357,21 @@ chat.openapi(completions, async (c) => {
 				(selectedProviderInfo.outputPrice ?? 0)
 			: 0;
 
+		// Fetch metrics for the selected provider to include in routing metadata
+		// This provides visibility into uptime/latency/throughput even for direct provider selection
+		const baseModelId = (modelInfo as ModelDefinition).id;
+		let providerMetrics:
+			| { uptime: number; averageLatency: number; throughput: number }
+			| undefined;
+
+		if (baseModelId && usedProvider !== "custom") {
+			const directMetricsMap = await getProviderMetricsForCombinations(
+				[{ modelId: baseModelId, providerId: usedProvider }],
+				5,
+			);
+			providerMetrics = directMetricsMap.get(`${baseModelId}:${usedProvider}`);
+		}
+
 		routingMetadata = {
 			availableProviders: [usedProvider],
 			selectedProvider: usedProvider,
@@ -1204,8 +1381,12 @@ chat.openapi(completions, async (c) => {
 					providerId: usedProvider,
 					score: 1,
 					price,
+					uptime: providerMetrics?.uptime,
+					latency: providerMetrics?.averageLatency,
+					throughput: providerMetrics?.throughput,
 				},
 			],
+			...(noFallback ? { noFallback: true } : {}),
 		};
 	}
 
@@ -1270,6 +1451,7 @@ chat.openapi(completions, async (c) => {
 	let providerKey: InferSelectModel<typeof tables.providerKey> | undefined;
 	let usedToken: string | undefined;
 	let configIndex = 0; // Index for round-robin environment variables
+	let envVarName: string | undefined; // Environment variable name for health tracking
 
 	if (project.mode === "credits" && usedProvider === "custom") {
 		throw new HTTPException(400, {
@@ -1379,6 +1561,7 @@ chat.openapi(completions, async (c) => {
 		const envResult = getProviderEnv(usedProvider);
 		usedToken = envResult.token;
 		configIndex = envResult.configIndex;
+		envVarName = envResult.envVarName;
 	} else if (project.mode === "hybrid") {
 		// First try to get the provider key from the database
 		if (usedProvider === "custom" && customProviderName) {
@@ -1472,6 +1655,7 @@ chat.openapi(completions, async (c) => {
 			const envResult = getProviderEnv(usedProvider);
 			usedToken = envResult.token;
 			configIndex = envResult.configIndex;
+			envVarName = envResult.envVarName;
 		}
 	} else {
 		throw new HTTPException(400, {
@@ -1490,6 +1674,17 @@ chat.openapi(completions, async (c) => {
 			usedModel,
 			modelInfo as ModelDefinition,
 		);
+	}
+
+	// Check if organization has credits for data retention costs
+	// Data storage is billed at $0.01 per 1M tokens, so we need credits when retention is enabled
+	if (organization && organization.retentionLevel === "retain") {
+		if (parseFloat(organization.credits || "0") <= 0) {
+			throw new HTTPException(402, {
+				message:
+					"Organization has insufficient credits for data retention. Data retention requires credits for storage costs ($0.01 per 1M tokens). Please add credits or disable data retention in organization settings.",
+			});
+		}
 	}
 
 	if (!usedToken) {
@@ -1652,12 +1847,14 @@ chat.openapi(completions, async (c) => {
 					frequency_penalty,
 					presence_penalty,
 					reasoning_effort,
+					effort,
 					response_format,
 					tools,
 					tool_choice,
 					source,
 					customHeaders,
 					debugMode,
+					image_config,
 					routingMetadata,
 					rawBody,
 					rawCachedResponseData, // Raw SSE data from cached response
@@ -1702,6 +1899,13 @@ chat.openapi(completions, async (c) => {
 					estimatedCost: costs.estimatedCost,
 					discount: costs.discount ?? null,
 					pricingTier: costs.pricingTier ?? null,
+					dataStorageCost: calculateDataStorageCost(
+						promptTokens,
+						cachedTokens,
+						completionTokens,
+						reasoningTokens,
+						retentionLevel,
+					),
 					cached: true,
 					toolResults:
 						(cachedStreamingResponse.metadata as { toolResults?: any })
@@ -1757,12 +1961,14 @@ chat.openapi(completions, async (c) => {
 					frequency_penalty,
 					presence_penalty,
 					reasoning_effort,
+					effort,
 					response_format,
 					tools,
 					tool_choice,
 					source,
 					customHeaders,
 					debugMode,
+					image_config,
 					routingMetadata,
 					rawBody,
 					cachedResponse,
@@ -1809,6 +2015,13 @@ chat.openapi(completions, async (c) => {
 					estimatedCost: cachedCosts.estimatedCost,
 					discount: cachedCosts.discount ?? null,
 					pricingTier: cachedCosts.pricingTier ?? null,
+					dataStorageCost: calculateDataStorageCost(
+						cachedResponse.usage?.prompt_tokens,
+						cachedResponse.usage?.prompt_tokens_details?.cached_tokens,
+						cachedResponse.usage?.completion_tokens,
+						cachedResponse.usage?.reasoning_tokens,
+						retentionLevel,
+					),
 					cached: true,
 					toolResults: cachedResponse.choices?.[0]?.message?.tool_calls || null,
 				});
@@ -1847,6 +2060,23 @@ chat.openapi(completions, async (c) => {
 		}
 	}
 
+	// Check if effort parameter is supported by the specific provider being used
+	if (effort !== undefined && finalModelInfo) {
+		const providerMapping = finalModelInfo.providers.find(
+			(p) => p.providerId === usedProvider && p.modelName === usedModel,
+		);
+
+		if (providerMapping) {
+			const params = (providerMapping as ProviderModelMapping)
+				.supportedParameters;
+			if (!params?.includes("effort")) {
+				throw new HTTPException(400, {
+					message: `Model ${usedModel} with provider ${usedProvider} does not support the effort parameter. Try using provider 'anthropic' instead.`,
+				});
+			}
+		}
+	}
+
 	// Check if the request can be canceled
 	const requestCanBeCanceled =
 		providers.find((p) => p.id === usedProvider)?.cancellation === true;
@@ -1871,6 +2101,7 @@ chat.openapi(completions, async (c) => {
 		userPlan,
 		sensitive_word_check,
 		image_config,
+		effort,
 	);
 
 	// Validate effective max_tokens value after prepareRequestBody
@@ -1966,6 +2197,14 @@ chat.openapi(completions, async (c) => {
 				const headers = getProviderHeaders(usedProvider, usedToken);
 				headers["Content-Type"] = "application/json";
 
+				// Add effort beta header for Anthropic if effort parameter is specified
+				if (usedProvider === "anthropic" && effort !== undefined) {
+					const currentBeta = headers["anthropic-beta"];
+					headers["anthropic-beta"] = currentBeta
+						? `${currentBeta},effort-2025-11-24`
+						: "effort-2025-11-24";
+				}
+
 				res = await fetch(url, {
 					method: "POST",
 					headers,
@@ -1995,12 +2234,14 @@ chat.openapi(completions, async (c) => {
 						frequency_penalty,
 						presence_penalty,
 						reasoning_effort,
+						effort,
 						response_format,
 						tools,
 						tool_choice,
 						source,
 						customHeaders,
 						debugMode,
+						image_config,
 						routingMetadata,
 						rawBody,
 						null, // No response for canceled request
@@ -2029,6 +2270,7 @@ chat.openapi(completions, async (c) => {
 						cachedInputCost: null,
 						requestCost: null,
 						discount: null,
+						dataStorageCost: "0",
 						cached: false,
 						toolResults: null,
 					});
@@ -2076,12 +2318,14 @@ chat.openapi(completions, async (c) => {
 						frequency_penalty,
 						presence_penalty,
 						reasoning_effort,
+						effort,
 						response_format,
 						tools,
 						tool_choice,
 						source,
 						customHeaders,
 						debugMode,
+						image_config,
 						routingMetadata,
 						rawBody,
 						null, // No response for fetch error
@@ -2114,9 +2358,15 @@ chat.openapi(completions, async (c) => {
 						cachedInputCost: null,
 						requestCost: null,
 						discount: null,
+						dataStorageCost: "0",
 						cached: false,
 						toolResults: null,
 					});
+
+					// Report key health for environment-based tokens
+					if (envVarName !== undefined) {
+						reportKeyError(envVarName, configIndex, 0);
+					}
 
 					// Send error event to the client
 					await writeSSEAndCache({
@@ -2151,7 +2401,7 @@ chat.openapi(completions, async (c) => {
 				);
 
 				if (finishReason !== "client_error") {
-					logger.error("Provider error", {
+					logger.warn("Provider error", {
 						status: res.status,
 						errorText: errorResponseText,
 						usedProvider,
@@ -2219,12 +2469,14 @@ chat.openapi(completions, async (c) => {
 					frequency_penalty,
 					presence_penalty,
 					reasoning_effort,
+					effort,
 					response_format,
 					tools,
 					tool_choice,
 					source,
 					customHeaders,
 					debugMode,
+					image_config,
 					routingMetadata,
 					rawBody,
 					null, // No response for error case
@@ -2257,9 +2509,15 @@ chat.openapi(completions, async (c) => {
 					cachedInputCost: null,
 					requestCost: null,
 					discount: null,
+					dataStorageCost: "0",
 					cached: false,
 					toolResults: null,
 				});
+
+				// Report key health for environment-based tokens
+				if (envVarName !== undefined) {
+					reportKeyError(envVarName, configIndex, res.status);
+				}
 
 				return;
 			}
@@ -2539,6 +2797,27 @@ chat.openapi(completions, async (c) => {
 								finalCompletionTokens !== null ||
 								finalTotalTokens !== null
 							) {
+								// Calculate costs for streaming response
+								const streamingCosts = calculateCosts(
+									usedModel,
+									usedProvider,
+									finalPromptTokens,
+									finalCompletionTokens,
+									cachedTokens,
+									{
+										prompt: messages.map((m) => m.content).join("\n"),
+										completion: fullContent,
+										toolResults: streamingToolCalls || undefined,
+									},
+									reasoningTokens,
+									outputImageCount,
+									image_config?.image_size,
+								);
+
+								// Only include costs in response if not hosted or if org is pro
+								const shouldIncludeCosts = !isHosted || userPlan === "pro";
+								const showUpgradeMessage = isHosted && userPlan !== "pro";
+
 								const finalUsageChunk = {
 									id: `chatcmpl-${Date.now()}`,
 									object: "chat.completion.chunk",
@@ -2561,6 +2840,16 @@ chat.openapi(completions, async (c) => {
 												(reasoningTokens || 0);
 											return Math.max(1, finalTotalTokens ?? fallbackTotal);
 										})(),
+										...(shouldIncludeCosts && {
+											cost_usd_total: streamingCosts.totalCost,
+											cost_usd_input: streamingCosts.inputCost,
+											cost_usd_output: streamingCosts.outputCost,
+											cost_usd_cached_input: streamingCosts.cachedInputCost,
+											cost_usd_request: streamingCosts.requestCost,
+										}),
+										...(showUpgradeMessage && {
+											info: "upgrade to pro to include usd cost breakdown",
+										}),
 									},
 								};
 
@@ -3232,12 +3521,14 @@ chat.openapi(completions, async (c) => {
 					frequency_penalty,
 					presence_penalty,
 					reasoning_effort,
+					effort,
 					response_format,
 					tools,
 					tool_choice,
 					source,
 					customHeaders,
 					debugMode,
+					image_config,
 					routingMetadata,
 					rawBody,
 					streamingError
@@ -3312,11 +3603,28 @@ chat.openapi(completions, async (c) => {
 					estimatedCost: costs.estimatedCost,
 					discount: costs.discount,
 					pricingTier: costs.pricingTier,
+					dataStorageCost: calculateDataStorageCost(
+						calculatedPromptTokens,
+						cachedTokens,
+						calculatedCompletionTokens,
+						calculatedReasoningTokens,
+						retentionLevel,
+					),
 					cached: false,
 					tools,
 					toolResults: streamingToolCalls,
 					toolChoice: tool_choice,
 				});
+
+				// Report key health for environment-based tokens
+				if (envVarName !== undefined) {
+					if (streamingError !== null) {
+						reportKeyError(envVarName, configIndex, 500);
+					} else {
+						reportKeySuccess(envVarName, configIndex);
+					}
+				}
+
 				// Save streaming cache if enabled and not canceled and no errors
 				if (
 					cachingEnabled &&
@@ -3372,6 +3680,15 @@ chat.openapi(completions, async (c) => {
 	try {
 		const headers = getProviderHeaders(usedProvider, usedToken);
 		headers["Content-Type"] = "application/json";
+
+		// Add effort beta header for Anthropic if effort parameter is specified
+		if (usedProvider === "anthropic" && effort !== undefined) {
+			const currentBeta = headers["anthropic-beta"];
+			headers["anthropic-beta"] = currentBeta
+				? `${currentBeta},effort-2025-11-24`
+				: "effort-2025-11-24";
+		}
+
 		res = await fetch(url, {
 			method: "POST",
 			headers,
@@ -3423,12 +3740,14 @@ chat.openapi(completions, async (c) => {
 			frequency_penalty,
 			presence_penalty,
 			reasoning_effort,
+			effort,
 			response_format,
 			tools,
 			tool_choice,
 			source,
 			customHeaders,
 			debugMode,
+			image_config,
 			routingMetadata,
 			rawBody,
 			null, // No response for fetch error
@@ -3462,9 +3781,15 @@ chat.openapi(completions, async (c) => {
 			requestCost: null,
 			estimatedCost: false,
 			discount: null,
+			dataStorageCost: "0",
 			cached: false,
 			toolResults: null,
 		});
+
+		// Report key health for environment-based tokens
+		if (envVarName !== undefined) {
+			reportKeyError(envVarName, configIndex, 0);
+		}
 
 		// Return error response
 		return c.json(
@@ -3504,12 +3829,14 @@ chat.openapi(completions, async (c) => {
 			frequency_penalty,
 			presence_penalty,
 			reasoning_effort,
+			effort,
 			response_format,
 			tools,
 			tool_choice,
 			source,
 			customHeaders,
 			debugMode,
+			image_config,
 			routingMetadata,
 			rawBody,
 			null, // No response for canceled request
@@ -3539,6 +3866,7 @@ chat.openapi(completions, async (c) => {
 			requestCost: null,
 			estimatedCost: false,
 			discount: null,
+			dataStorageCost: "0",
 			cached: false,
 			toolResults: null,
 		});
@@ -3567,7 +3895,7 @@ chat.openapi(completions, async (c) => {
 		);
 
 		if (finishReason !== "client_error") {
-			logger.error("Provider error", {
+			logger.warn("Provider error", {
 				status: res.status,
 				errorText: errorResponseText,
 				usedProvider,
@@ -3595,12 +3923,14 @@ chat.openapi(completions, async (c) => {
 			frequency_penalty,
 			presence_penalty,
 			reasoning_effort,
+			effort,
 			response_format,
 			tools,
 			tool_choice,
 			source,
 			customHeaders,
 			debugMode,
+			image_config,
 			routingMetadata,
 			rawBody,
 			errorResponseText, // Our formatted error response
@@ -3650,9 +3980,15 @@ chat.openapi(completions, async (c) => {
 			requestCost: null,
 			estimatedCost: false,
 			discount: null,
+			dataStorageCost: "0",
 			cached: false,
 			toolResults: null,
 		});
+
+		// Report key health for environment-based tokens
+		if (envVarName !== undefined) {
+			reportKeyError(envVarName, configIndex, res.status);
+		}
 
 		// Use the already determined finish reason for response logic
 
@@ -3772,6 +4108,9 @@ chat.openapi(completions, async (c) => {
 	);
 
 	// Transform response to OpenAI format for non-OpenAI providers
+	// Only include costs in response if not hosted or if org is pro
+	const shouldIncludeCosts = !isHosted || userPlan === "pro";
+	const showUpgradeMessage = isHosted && userPlan !== "pro";
 	const transformedResponse = transformResponseToOpenai(
 		usedProvider,
 		usedModel,
@@ -3791,6 +4130,16 @@ chat.openapi(completions, async (c) => {
 		modelInput,
 		requestedProvider || null,
 		baseModelName,
+		shouldIncludeCosts
+			? {
+					inputCost: costs.inputCost,
+					outputCost: costs.outputCost,
+					cachedInputCost: costs.cachedInputCost,
+					requestCost: costs.requestCost,
+					totalCost: costs.totalCost,
+				}
+			: null,
+		showUpgradeMessage,
 	);
 
 	const baseLogEntry = createLogEntry(
@@ -3810,12 +4159,14 @@ chat.openapi(completions, async (c) => {
 		frequency_penalty,
 		presence_penalty,
 		reasoning_effort,
+		effort,
 		response_format,
 		tools,
 		tool_choice,
 		source,
 		customHeaders,
 		debugMode,
+		image_config,
 		routingMetadata,
 		rawBody,
 		transformedResponse, // Our formatted response that we return to user
@@ -3880,11 +4231,27 @@ chat.openapi(completions, async (c) => {
 		estimatedCost: costs.estimatedCost,
 		discount: costs.discount,
 		pricingTier: costs.pricingTier,
+		dataStorageCost: calculateDataStorageCost(
+			calculatedPromptTokens,
+			cachedTokens,
+			calculatedCompletionTokens,
+			calculatedReasoningTokens,
+			retentionLevel,
+		),
 		cached: false,
 		tools,
 		toolResults,
 		toolChoice: tool_choice,
 	});
+
+	// Report key health for environment-based tokens
+	if (envVarName !== undefined) {
+		if (hasEmptyNonStreamingResponse) {
+			reportKeyError(envVarName, configIndex, 500);
+		} else {
+			reportKeySuccess(envVarName, configIndex);
+		}
+	}
 
 	if (cachingEnabled && cacheKey && !stream && !hasEmptyNonStreamingResponse) {
 		await setCache(cacheKey, transformedResponse, cacheDuration);

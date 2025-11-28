@@ -1,3 +1,5 @@
+import { getProviderDefinition } from "./providers.js";
+
 import type { ProviderModelMapping } from "./models.js";
 import type { AvailableModelProvider, ModelWithPricing } from "./types.js";
 import type { ProviderMetrics } from "@llmgateway/db";
@@ -37,7 +39,13 @@ export interface RoutingMetadata {
 		latency?: number;
 		throughput?: number;
 		price: number;
+		priority?: number;
 	}>;
+	// Optional fields for low-uptime fallback routing
+	originalProvider?: string;
+	originalProviderUptime?: number;
+	// Whether fallback was disabled via X-No-Fallback header
+	noFallback?: boolean;
 }
 
 export interface ProviderSelectionResult<T extends AvailableModelProvider> {
@@ -45,13 +53,18 @@ export interface ProviderSelectionResult<T extends AvailableModelProvider> {
 	metadata: RoutingMetadata;
 }
 
+export interface ProviderSelectionOptions {
+	metricsMap?: Map<string, ProviderMetrics>;
+	isStreaming?: boolean;
+}
+
 /**
  * Get the best provider from a list of available model providers.
- * Considers price, uptime, and latency metrics.
+ * Considers price, uptime, throughput, and latency metrics.
  *
  * @param availableModelProviders - List of available providers
  * @param modelWithPricing - Model pricing information (must have id property)
- * @param metricsMap - Optional map of provider metrics from last N minutes
+ * @param options - Optional settings including metricsMap and isStreaming flag
  * @returns Best provider and routing metadata, or null if none available
  */
 export function getCheapestFromAvailableProviders<
@@ -59,8 +72,10 @@ export function getCheapestFromAvailableProviders<
 >(
 	availableModelProviders: T[],
 	modelWithPricing: ModelWithPricing & { id: string },
-	metricsMap?: Map<string, ProviderMetrics>,
+	options?: ProviderSelectionOptions,
 ): ProviderSelectionResult<T> | null {
+	const metricsMap = options?.metricsMap;
+	const isStreaming = options?.isStreaming ?? false;
 	if (availableModelProviders.length === 0) {
 		return null;
 	}
@@ -178,17 +193,35 @@ export function getCheapestFromAvailableProviders<
 			throughputRange > 0 ? (maxThroughput - throughput) / throughputRange : 0;
 
 		// Normalize latency (0 = fastest, 1 = slowest)
-		const latency = providerScore.latency ?? DEFAULT_LATENCY;
-		const latencyRange = maxLatency - minLatency;
-		const latencyScore =
-			latencyRange > 0 ? (latency - minLatency) / latencyRange : 0;
+		// Only consider latency for streaming requests since it's only measured there
+		let latencyScore = 0;
+		if (isStreaming) {
+			const latency = providerScore.latency ?? DEFAULT_LATENCY;
+			const latencyRange = maxLatency - minLatency;
+			latencyScore =
+				latencyRange > 0 ? (latency - minLatency) / latencyRange : 0;
+		}
 
-		// Calculate weighted score (lower is better)
-		providerScore.score =
-			PRICE_WEIGHT * priceScore +
-			UPTIME_WEIGHT * uptimeScore +
-			THROUGHPUT_WEIGHT * throughputScore +
-			LATENCY_WEIGHT * latencyScore;
+		// Calculate base weighted score (lower is better)
+		// When not streaming, latency weight (0.1) is redistributed to other factors
+		const effectiveLatencyWeight = isStreaming ? LATENCY_WEIGHT : 0;
+		const weightSum =
+			PRICE_WEIGHT + UPTIME_WEIGHT + THROUGHPUT_WEIGHT + effectiveLatencyWeight;
+		const baseScore =
+			(PRICE_WEIGHT / weightSum) * priceScore +
+			(UPTIME_WEIGHT / weightSum) * uptimeScore +
+			(THROUGHPUT_WEIGHT / weightSum) * throughputScore +
+			(effectiveLatencyWeight / weightSum) * latencyScore;
+
+		// Apply provider priority: lower priority = higher score (less preferred)
+		// Priority defaults to 1. We add (1 - priority) as a penalty.
+		// e.g., priority 0.8 adds 0.2 penalty, priority 1.0 adds 0 penalty
+		const providerDef = getProviderDefinition(
+			providerScore.provider.providerId,
+		);
+		const priority = providerDef?.priority ?? 1;
+		const priorityPenalty = 1 - priority;
+		providerScore.score = baseScore + priorityPenalty;
 	}
 
 	// Select provider with lowest score
@@ -204,14 +237,19 @@ export function getCheapestFromAvailableProviders<
 		availableProviders: providerScores.map((p) => p.provider.providerId),
 		selectedProvider: bestProvider.provider.providerId,
 		selectionReason: metricsMap ? "weighted-score" : "price-only",
-		providerScores: providerScores.map((p) => ({
-			providerId: p.provider.providerId,
-			score: Number(p.score.toFixed(3)),
-			uptime: p.uptime,
-			latency: p.latency,
-			throughput: p.throughput,
-			price: p.price, // Keep full precision for very small prices
-		})),
+		providerScores: providerScores.map((p) => {
+			const providerDef = getProviderDefinition(p.provider.providerId);
+			const priority = providerDef?.priority ?? 1;
+			return {
+				providerId: p.provider.providerId,
+				score: Number(p.score.toFixed(3)),
+				uptime: p.uptime,
+				latency: p.latency,
+				throughput: p.throughput,
+				price: p.price, // Keep full precision for very small prices
+				priority,
+			};
+		}),
 	};
 
 	return {
@@ -228,9 +266,14 @@ function selectByPriceOnly<T extends AvailableModelProvider>(
 	modelWithPricing: ModelWithPricing & { id: string },
 ): ProviderSelectionResult<T> {
 	let cheapestProvider = stableProviders[0];
-	let lowestPrice = Number.MAX_VALUE;
+	let lowestEffectivePrice = Number.MAX_VALUE;
 
-	const providerPrices: Array<{ providerId: string; price: number }> = [];
+	const providerPrices: Array<{
+		providerId: string;
+		price: number;
+		effectivePrice: number;
+		priority: number;
+	}> = [];
 
 	for (const provider of stableProviders) {
 		const providerInfo = modelWithPricing.providers.find(
@@ -243,13 +286,20 @@ function selectByPriceOnly<T extends AvailableModelProvider>(
 				2) *
 			discountMultiplier;
 
+		// Apply provider priority: lower priority = effectively higher price
+		const providerDef = getProviderDefinition(provider.providerId);
+		const priority = providerDef?.priority ?? 1;
+		const effectivePrice = priority > 0 ? totalPrice / priority : totalPrice;
+
 		providerPrices.push({
 			providerId: provider.providerId,
-			price: totalPrice, // Keep full precision for very small prices
+			price: totalPrice,
+			effectivePrice,
+			priority,
 		});
 
-		if (totalPrice < lowestPrice) {
-			lowestPrice = totalPrice;
+		if (effectivePrice < lowestEffectivePrice) {
+			lowestEffectivePrice = effectivePrice;
 			cheapestProvider = provider;
 		}
 	}
@@ -262,6 +312,7 @@ function selectByPriceOnly<T extends AvailableModelProvider>(
 			providerId: p.providerId,
 			score: 0,
 			price: p.price,
+			priority: p.priority,
 		})),
 	};
 

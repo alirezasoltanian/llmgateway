@@ -23,12 +23,19 @@ export function createLogEntry(
 	frequency_penalty: number | undefined,
 	presence_penalty: number | undefined,
 	reasoningEffort: "minimal" | "low" | "medium" | "high" | undefined,
+	effort: "low" | "medium" | "high" | undefined,
 	responseFormat: any | undefined,
 	tools: OpenAIToolInput[] | undefined,
 	toolChoice: any | undefined,
 	source: string | undefined,
 	customHeaders: Record<string, string>,
 	debugMode: boolean,
+	imageConfig?:
+		| {
+				aspect_ratio?: string;
+				image_size?: string;
+		  }
+		| undefined,
 	routingMetadata?: RoutingMetadata,
 	rawRequest?: unknown,
 	rawResponse?: unknown,
@@ -56,12 +63,17 @@ export function createLogEntry(
 		frequencyPenalty: frequency_penalty || null,
 		presencePenalty: presence_penalty || null,
 		reasoningEffort: reasoningEffort || null,
+		effort: effort || null,
 		responseFormat: responseFormat || null,
 		tools: tools || null,
 		toolChoice: toolChoice || null,
 		mode: project.mode,
 		source: source || null,
 		customHeaders: Object.keys(customHeaders).length > 0 ? customHeaders : null,
+		params:
+			imageConfig?.aspect_ratio || imageConfig?.image_size
+				? { image_config: imageConfig }
+				: null,
 		routingMetadata: routingMetadata || null,
 		traceId,
 		// Only include raw payloads if x-debug header is set to true

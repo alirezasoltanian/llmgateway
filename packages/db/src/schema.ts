@@ -139,7 +139,7 @@ export const organization = pgTable("organization", {
 		enum: ["retain", "none"],
 	})
 		.notNull()
-		.default("retain"),
+		.default("none"),
 	status: text({
 		enum: ["active", "inactive", "deleted"],
 	}).default("active"),
@@ -416,6 +416,7 @@ export const log = pgTable(
 		frequencyPenalty: real(),
 		presencePenalty: real(),
 		reasoningEffort: text(),
+		effort: text(),
 		responseFormat: json(),
 		hasError: boolean().default(false),
 		errorDetails: json().$type<z.infer<typeof errorDetails>>(),
@@ -449,6 +450,7 @@ export const log = pgTable(
 				latency?: number;
 				throughput?: number;
 				price?: number;
+				priority?: number;
 			}>;
 		}>(),
 		processedAt: timestamp(),
@@ -458,6 +460,13 @@ export const log = pgTable(
 		upstreamResponse: jsonb(),
 		traceId: text(),
 		dataRetentionCleanedUp: boolean().default(false),
+		dataStorageCost: decimal().notNull().default("0"),
+		params: json().$type<{
+			image_config?: {
+				aspect_ratio?: string;
+				image_size?: string;
+			};
+		}>(),
 	},
 	(table) => [
 		index("log_project_id_created_at_idx").on(table.projectId, table.createdAt),

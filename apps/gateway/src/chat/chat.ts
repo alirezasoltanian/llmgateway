@@ -3364,6 +3364,7 @@ chat.openapi(completions, async (c) => {
 					!streamingError &&
 					finishReason &&
 					(!calculatedCompletionTokens || calculatedCompletionTokens === 0) &&
+					(!calculatedReasoningTokens || calculatedReasoningTokens === 0) &&
 					(!fullContent || fullContent.trim() === "") &&
 					(!streamingToolCalls || streamingToolCalls.length === 0);
 
@@ -4189,8 +4190,20 @@ chat.openapi(completions, async (c) => {
 		finishReason !== "content_filter" &&
 		!isGoogleContentFilter &&
 		(!calculatedCompletionTokens || calculatedCompletionTokens === 0) &&
+		(!calculatedReasoningTokens || calculatedReasoningTokens === 0) &&
 		(!content || content.trim() === "") &&
 		(!toolResults || toolResults.length === 0);
+
+	if (hasEmptyNonStreamingResponse) {
+		logger.debug("Empty non-streaming response detected", {
+			finishReason,
+			usedProvider,
+			usedModel,
+			calculatedCompletionTokens,
+			contentLength: content?.length ?? 0,
+			toolResultsLength: toolResults?.length ?? 0,
+		});
+	}
 
 	await insertLog({
 		...baseLogEntry,
@@ -4245,12 +4258,9 @@ chat.openapi(completions, async (c) => {
 	});
 
 	// Report key health for environment-based tokens
+	// Note: We don't report empty responses as key errors since they're not upstream errors
 	if (envVarName !== undefined) {
-		if (hasEmptyNonStreamingResponse) {
-			reportKeyError(envVarName, configIndex, 500);
-		} else {
-			reportKeySuccess(envVarName, configIndex);
-		}
+		reportKeySuccess(envVarName, configIndex);
 	}
 
 	if (cachingEnabled && cacheKey && !stream && !hasEmptyNonStreamingResponse) {

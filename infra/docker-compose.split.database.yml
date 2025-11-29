@@ -175,7 +175,8 @@ services:
 
   # Redis for caching and queues
   redis:
-    image: redis:8-alpine
+    image: arm64v8/redis:8-alpine
+    platform: linux/arm64/v8
     container_name: llmgateway-redis
     restart: unless-stopped
     command:

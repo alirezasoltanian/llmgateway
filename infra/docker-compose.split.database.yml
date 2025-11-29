@@ -176,7 +176,6 @@ services:
   # Redis for caching and queues
   redis:
     image: redis:8-alpine
-    platform: linux/amd64
     container_name: llmgateway-redis
     restart: unless-stopped
     command:
@@ -194,7 +193,16 @@ services:
     environment:
       CI: ${CI}
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-a",
+          "${REDIS_PASSWORD:-redis_dev_password}",
+          "--raw",
+          "incr",
+          "ping",
+        ]
       interval: 10s
       timeout: 3s
       retries: 5

@@ -13,7 +13,7 @@ const chats = new OpenAPIHono<ServerTypes>();
 const chatSchema = z.object({
 	id: z.string(),
 	title: z.string(),
-	model: z.string(),
+	model: z.string().nullable(),
 	status: z.enum(["active", "archived", "deleted"]),
 	createdAt: z.string().datetime(),
 	updatedAt: z.string().datetime(),
@@ -27,7 +27,7 @@ const messageSchema = z.object({
 	images: z.string().nullable(), // JSON string
 	reasoning: z.string().nullable(), // Reasoning content
 	tools: z.string().nullable(), // JSON string of tool parts
-	sequence: z.number(),
+	sequence: z.number().nullable(),
 	createdAt: z.string().datetime(),
 });
 

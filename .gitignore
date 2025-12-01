@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+.env.development
 packages/**/*.js
 apps/**/*.js
 *spec.yaml

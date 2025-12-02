@@ -138,7 +138,7 @@ export default function Login() {
 						Welcome back
 					</h1>
 					<p className="text-sm text-muted-foreground">
-						Enter your email and password to sign in to your account111
+						Enter your email and password to sign in to your account
 					</p>
 				</div>
 				<Form {...form}>

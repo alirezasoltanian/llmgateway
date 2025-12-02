@@ -1,4 +1,7 @@
-import { passkeyClient } from "better-auth/client/plugins";
+import {
+	genericOAuthClient,
+	phoneNumberClient,
+} from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import { useMemo } from "react";
 
@@ -10,8 +13,8 @@ export function useAuthClient() {
 
 	return useMemo(() => {
 		return createAuthClient({
-			baseURL: config.apiUrl + "/auth",
-			plugins: [passkeyClient()],
+			baseURL: process.env.SOLOP_APP_URL,
+			plugins: [phoneNumberClient(), genericOAuthClient()],
 		});
 	}, [config.apiUrl]);
 }

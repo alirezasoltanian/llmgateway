@@ -210,9 +210,12 @@ export function ChatSidebar({
 
 		return groups;
 	};
-
+	const safeChats = chats.map((chat) => ({
+		...chat,
+		model: chat.model ?? "",
+	})) as Chat[];
 	const chatGroups = groupChatsByDate(
-		[...chats].sort(
+		[...safeChats].sort(
 			(a, b) =>
 				new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
 		),

@@ -6,9 +6,8 @@ services:
   gateway:
     build:
       context: ..
-      # دقت کنید فایل داکرفایل اصلی پروژه کجاست. معمولا فقط Dockerfile است نه infra/split.dockerfile
-      # اگر خطا داد infra/split.dockerfile را به Dockerfile تغییر دهید
-      dockerfile: Dockerfile
+      # 👇 مسیر اصلاح شد
+      dockerfile: infra/split.dockerfile
       target: gateway
     image: llmgateway-gateway:local
     container_name: llmgateway-gateway
@@ -36,7 +35,6 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=80
-      # دیتابیس خارجی
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -49,7 +47,8 @@ services:
   api:
     build:
       context: ..
-      dockerfile: Dockerfile
+      # 👇 مسیر اصلاح شد
+      dockerfile: infra/split.dockerfile
       target: api
     image: llmgateway-api:local
     container_name: llmgateway-api
@@ -101,7 +100,8 @@ services:
   ui:
     build:
       context: ..
-      dockerfile: Dockerfile
+      # 👇 مسیر اصلاح شد
+      dockerfile: infra/split.dockerfile
       target: ui
     image: llmgateway-ui:local
     container_name: llmgateway-ui
@@ -136,7 +136,8 @@ services:
   playground:
     build:
       context: ..
-      dockerfile: Dockerfile
+      # 👇 مسیر اصلاح شد
+      dockerfile: infra/split.dockerfile
       target: playground
     image: llmgateway-playground:local
     container_name: llmgateway-playground
@@ -171,7 +172,8 @@ services:
   docs:
     build:
       context: ..
-      dockerfile: Dockerfile
+      # 👇 مسیر اصلاح شد
+      dockerfile: infra/split.dockerfile
       target: docs
     image: llmgateway-docs:local
     container_name: llmgateway-docs

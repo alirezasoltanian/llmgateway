@@ -1,0 +1,246 @@
+version: "3"
+name: llmgateway-prod
+
+services:
+  # Gateway Service
+  gateway:
+    build:
+      context: ..
+      # دقت کنید فایل داکرفایل اصلی پروژه کجاست. معمولا فقط Dockerfile است نه infra/split.dockerfile
+      # اگر خطا داد infra/split.dockerfile را به Dockerfile تغییر دهید
+      dockerfile: Dockerfile
+      target: gateway
+    image: llmgateway-gateway:local
+    container_name: llmgateway-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-4001}:80"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:80/",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - shared_network
+    environment:
+      - NODE_ENV=production
+      - PORT=80
+      # دیتابیس خارجی
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_dev_password}
+      - LLM_OPENAI_API_KEY=${LLM_OPENAI_API_KEY}
+      - LLM_ANTHROPIC_API_KEY=${LLM_ANTHROPIC_API_KEY}
+      - CI=${CI}
+
+  # API Service
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: api
+    image: llmgateway-api:local
+    container_name: llmgateway-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-4002}:80"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:80/",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - shared_network
+    environment:
+      - NODE_ENV=production
+      - RUN_MIGRATIONS=true
+      - PORT=80
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_dev_password}
+      - UI_URL=${UI_URL:-http://localhost:3002}
+      - API_URL=${API_URL:-http://localhost:4002}
+      - ORIGIN_URLS=${ORIGIN_URLS:-http://localhost:3002,http://localhost:3003,http://localhost:4002}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-localhost}
+      - PASSKEY_RP_ID=${PASSKEY_RP_ID:-localhost}
+      - PASSKEY_RP_NAME=${PASSKEY_RP_NAME:-LLMGateway}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - POSTHOG_KEY=${POSTHOG_KEY}
+      - POSTHOG_HOST=${POSTHOG_HOST}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - CI=${CI}
+
+  # UI Service
+  ui:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: ui
+    image: llmgateway-ui:local
+    container_name: llmgateway-ui
+    restart: unless-stopped
+    ports:
+      - "${UI_PORT:-3002}:80"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:80/",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - shared_network
+    environment:
+      - API_URL=${API_URL:-http://localhost:4002}
+      - API_BACKEND_URL=${API_BACKEND_URL:-http://api:80}
+      - PLAYGROUND_URL=${PLAYGROUND_URL:-http://localhost:3003}
+      - DOCS_URL=${DOCS_URL:-http://localhost:3005}
+      - POSTHOG_HOST=${POSTHOG_HOST}
+      - POSTHOG_KEY=${POSTHOG_KEY}
+      - CI=${CI}
+
+  # Playground Service
+  playground:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: playground
+    image: llmgateway-playground:local
+    container_name: llmgateway-playground
+    restart: unless-stopped
+    ports:
+      - "${PLAYGROUND_PORT:-3003}:80"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:80/",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - shared_network
+    environment:
+      - API_URL=${API_URL:-http://localhost:4002}
+      - API_BACKEND_URL=${API_BACKEND_URL:-http://api:80}
+      - DOCS_URL=${DOCS_URL:-http://localhost:3005}
+      - PLAYGROUND_URL=${PLAYGROUND_URL:-http://localhost:3003}
+      - POSTHOG_HOST=${POSTHOG_HOST}
+      - POSTHOG_KEY=${POSTHOG_KEY}
+      - CI=${CI}
+
+  # Docs Service
+  docs:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: docs
+    image: llmgateway-docs:local
+    container_name: llmgateway-docs
+    restart: unless-stopped
+    ports:
+      - "${DOCS_PORT:-3005}:80"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:80/",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - shared_network
+    environment:
+      - DOCS_URL=${DOCS_URL:-http://localhost:3005}
+      - PLAYGROUND_URL=${PLAYGROUND_URL:-http://localhost:3003}
+      - POSTHOG_KEY=${POSTHOG_KEY}
+      - POSTHOG_HOST=${POSTHOG_HOST}
+      - CI=${CI}
+
+  # Redis
+  redis:
+    image: arm64v8/redis:8-alpine
+    platform: linux/arm64/v8
+    container_name: llmgateway-redis
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--requirepass",
+        "${REDIS_PASSWORD:-redis_dev_password}",
+      ]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    environment:
+      CI: ${CI}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-a",
+          "${REDIS_PASSWORD:-redis_dev_password}",
+          "--raw",
+          "incr",
+          "ping",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - shared_network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  shared_network:
+    external: true

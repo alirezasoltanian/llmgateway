@@ -1,8 +1,8 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "a51b8f7b-6b4d-4497-8465-ad6eaadb7b7c",
-  "prevId": "17de784f-fdb2-4f1a-a02c-fa3ecaed1dc2",
+  "id": "e7fc9db0-73b4-447a-85a9-6b1764f85d2e",
+  "prevId": "00000000-0000-0000-0000-000000000000",
   "ddl": [
     {
       "isRlsEnabled": false,
@@ -144,7 +144,7 @@
     },
     {
       "isRlsEnabled": false,
-      "name": "user_organization",
+      "name": "member",
       "entityType": "tables",
       "schema": "public"
     },
@@ -645,7 +645,7 @@
     {
       "type": "text",
       "typeSchema": null,
-      "notNull": true,
+      "notNull": false,
       "dimensions": 0,
       "default": null,
       "generated": null,
@@ -1785,7 +1785,7 @@
     {
       "type": "integer",
       "typeSchema": null,
-      "notNull": true,
+      "notNull": false,
       "dimensions": 0,
       "default": null,
       "generated": null,
@@ -4839,7 +4839,7 @@
       "name": "id",
       "entityType": "columns",
       "schema": "public",
-      "table": "user_organization"
+      "table": "member"
     },
     {
       "type": "timestamp",
@@ -4855,7 +4855,7 @@
       "name": "created_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "user_organization"
+      "table": "member"
     },
     {
       "type": "timestamp",
@@ -4871,7 +4871,7 @@
       "name": "updated_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "user_organization"
+      "table": "member"
     },
     {
       "type": "text",
@@ -4884,7 +4884,7 @@
       "name": "user_id",
       "entityType": "columns",
       "schema": "public",
-      "table": "user_organization"
+      "table": "member"
     },
     {
       "type": "text",
@@ -4897,7 +4897,7 @@
       "name": "organization_id",
       "entityType": "columns",
       "schema": "public",
-      "table": "user_organization"
+      "table": "member"
     },
     {
       "type": "text",
@@ -4913,7 +4913,7 @@
       "name": "role",
       "entityType": "columns",
       "schema": "public",
-      "table": "user_organization"
+      "table": "member"
     },
     {
       "type": "text",
@@ -5656,10 +5656,10 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "user_organization_user_id_idx",
+      "name": "member_user_id_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "user_organization"
+      "table": "member"
     },
     {
       "nameExplicit": true,
@@ -5677,10 +5677,10 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "user_organization_organization_id_idx",
+      "name": "member_organization_id_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "user_organization"
+      "table": "member"
     },
     {
       "nameExplicit": false,
@@ -5694,7 +5694,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "account_user_id_user_id_fk",
+      "name": "account_user_id_user_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "account"
@@ -5711,7 +5711,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "api_key_project_id_project_id_fk",
+      "name": "api_key_project_id_project_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "api_key"
@@ -5728,7 +5728,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "api_key_created_by_user_id_fk",
+      "name": "api_key_created_by_user_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "api_key"
@@ -5745,7 +5745,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "api_key_iam_rule_api_key_id_api_key_id_fk",
+      "name": "api_key_iam_rule_api_key_id_api_key_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "api_key_iam_rule"
@@ -5762,7 +5762,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "chat_user_id_user_id_fk",
+      "name": "chat_user_id_user_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "chat"
@@ -5779,7 +5779,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "message_chat_id_chat_id_fk",
+      "name": "message_chat_id_chat_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "message"
@@ -5796,7 +5796,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "model_provider_mapping_model_id_model_id_fk",
+      "name": "model_provider_mapping_model_id_model_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "model_provider_mapping"
@@ -5813,7 +5813,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "model_provider_mapping_provider_id_provider_id_fk",
+      "name": "model_provider_mapping_provider_id_provider_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "model_provider_mapping"
@@ -5830,7 +5830,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "organization_action_organization_id_organization_id_fk",
+      "name": "organization_action_organization_id_organization_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "organization_action"
@@ -5847,7 +5847,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "passkey_user_id_user_id_fk",
+      "name": "passkey_user_id_user_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "passkey"
@@ -5864,7 +5864,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "payment_method_organization_id_organization_id_fk",
+      "name": "payment_method_organization_id_organization_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "payment_method"
@@ -5881,7 +5881,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "project_organization_id_organization_id_fk",
+      "name": "project_organization_id_organization_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "project"
@@ -5898,7 +5898,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "provider_key_organization_id_organization_id_fk",
+      "name": "provider_key_organization_id_organization_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "provider_key"
@@ -5949,7 +5949,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "session_user_id_user_id_fk",
+      "name": "session_user_id_user_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "session"
@@ -5966,7 +5966,7 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "transaction_organization_id_organization_id_fk",
+      "name": "transaction_organization_id_organization_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "transaction"
@@ -5983,10 +5983,10 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "user_organization_user_id_user_id_fk",
+      "name": "member_user_id_user_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "user_organization"
+      "table": "member"
     },
     {
       "nameExplicit": false,
@@ -6000,10 +6000,10 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "user_organization_organization_id_organization_id_fk",
+      "name": "member_organization_id_organization_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "user_organization"
+      "table": "member"
     },
     {
       "columns": [
@@ -6240,9 +6240,9 @@
         "id"
       ],
       "nameExplicit": false,
-      "name": "user_organization_pkey",
+      "name": "member_pkey",
       "schema": "public",
-      "table": "user_organization",
+      "table": "member",
       "entityType": "pks"
     },
     {
@@ -6309,7 +6309,7 @@
         "token"
       ],
       "nullsNotDistinct": false,
-      "name": "api_key_token_unique",
+      "name": "api_key_token_key",
       "schema": "public",
       "table": "api_key",
       "entityType": "uniques"
@@ -6320,7 +6320,7 @@
         "uuid"
       ],
       "nullsNotDistinct": false,
-      "name": "installation_uuid_unique",
+      "name": "installation_uuid_key",
       "schema": "public",
       "table": "installation",
       "entityType": "uniques"
@@ -6331,7 +6331,7 @@
         "key"
       ],
       "nullsNotDistinct": false,
-      "name": "lock_key_unique",
+      "name": "lock_key_key",
       "schema": "public",
       "table": "lock",
       "entityType": "uniques"
@@ -6375,7 +6375,7 @@
         "token"
       ],
       "nullsNotDistinct": false,
-      "name": "session_token_unique",
+      "name": "session_token_key",
       "schema": "public",
       "table": "session",
       "entityType": "uniques"
@@ -6386,7 +6386,7 @@
         "email"
       ],
       "nullsNotDistinct": false,
-      "name": "user_email_unique",
+      "name": "user_email_key",
       "schema": "public",
       "table": "user",
       "entityType": "uniques"

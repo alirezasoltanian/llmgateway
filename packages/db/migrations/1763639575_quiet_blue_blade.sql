@@ -1,1 +1,0 @@
-ALTER TABLE "log" ADD COLUMN "pricing_tier" text;

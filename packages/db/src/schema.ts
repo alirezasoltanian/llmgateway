@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { defineRelations, sql } from "drizzle-orm";
 import {
 	boolean,
 	decimal,
@@ -6,11 +6,13 @@ import {
 	integer,
 	json,
 	jsonb,
+	pgEnum,
 	pgTable,
 	real,
 	text,
 	timestamp,
 	unique,
+	varchar,
 } from "drizzle-orm/pg-core";
 import { customAlphabet } from "nanoid";
 
@@ -819,3 +821,147 @@ export const modelHistory = pgTable(
 		index("model_history_minute_timestamp_idx").on(table.minuteTimestamp),
 	],
 );
+
+// order
+
+export const deliveryStatusEnum = pgEnum("delivery_status", [
+	"canceled",
+	"preparing",
+	"awaiting_delivery",
+	"delivered_to_courier",
+	"succeeded",
+]);
+export const paymentStatusEnum = pgEnum("payment_status", [
+	"requires_payment_method",
+	"requires_confirmation",
+	"requires_capture",
+	"requires_action",
+	"processing",
+	"canceled",
+	"succeeded",
+]);
+export const paymentMethodEnum = pgEnum("payment_method", [
+	"zarinpal",
+	"zibal",
+	"gateway",
+	"card-to-card",
+]);
+export const paymentTypeEnum = pgEnum("payment_type", [
+	"order",
+	"plan:free",
+	"plan:standard",
+	"plan:pro",
+	"credit_topup",
+]);
+
+export type PaymentMethod = (typeof paymentMethodEnum.enumValues)[number];
+
+export const orders = pgTable(
+	"orders",
+	{
+		id: text().primaryKey().$defaultFn(shortid),
+		storeId: varchar("store_id", { length: 255 }).notNull(),
+		userId: varchar("user_id", { length: 255 }).notNull(),
+		description: text("description"),
+		paymentIntentId: varchar("payment_intent_id", { length: 255 }),
+		attacheFile: json("attache_file").$type<any[]>(),
+		items: json("items").$type<any | null>().default(null),
+		quantity: integer("quantity"),
+		amount: decimal("amount", { precision: 10, scale: 2 })
+			.notNull()
+			.default("0"),
+		stripePaymentIntentId: text("stripe_payment_intent_id").notNull(),
+		paymentType: paymentTypeEnum("payment_type"),
+		paymentMethod: text("payment_method"),
+		stripePaymentIntentStatus: text("stripe_payment_intent_status").notNull(),
+		name: text("name").notNull(),
+		email: text("email").notNull(),
+		cardNumber: text("card_number"),
+		deliveryStatus: deliveryStatusEnum("delivery_status").default("preparing"),
+		orderSteps: json("order_steps").$type<any | null>().default([]),
+		deliveryId: varchar("delivery_id", { length: 255 }),
+		providerDeliveryId: varchar("provider_delivery_id", { length: 255 }),
+		providerDelivery: varchar("provider_delivery", { length: 255 }).default(
+			"snapp",
+		),
+		userAddress: json("user_address").$type<any | null>().default(null),
+
+		createdAt: timestamp().notNull().defaultNow(),
+		updatedAt: timestamp()
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date()),
+	},
+	(table) => ({
+		// unqPaymentIntentIdUserId: unique().on(table.paymentIntentId, table.userId),
+		storeIdIdx: index(`orders_store_id_idx`).on(table.storeId),
+	}),
+);
+
+export const paymentIntents = pgTable("payment_intents", {
+	id: text().primaryKey().$defaultFn(shortid),
+	applicationFeeAmount: varchar("application_fee_amount", {
+		length: 255,
+	})
+		.notNull()
+		.default("0"),
+	metadata: json("metadata").$type<any>(),
+	userId: varchar("user_id", { length: 255 }).notNull(),
+	amount: decimal("amount", { precision: 10, scale: 2 }).notNull().default("0"),
+	paymentType: paymentTypeEnum("payment_type"),
+	paymentMethod: varchar("payment_method", {
+		length: 255,
+	}).notNull(),
+	quantity: integer("quantity"),
+	description: text("description"),
+	attacheFile: json("attache_file").$type<any>(),
+	paymentIntentId: varchar("payment_intent_Id", {
+		length: 255,
+	}).notNull(),
+	discountCodeId: varchar("discount_code_id", {
+		length: 255,
+	}),
+	currency: varchar("currency", { length: 255 }),
+	storeId: varchar("store_id", { length: 255 }).references(
+		() => organization.id,
+		{
+			onDelete: "cascade",
+		},
+	),
+	email: varchar("email", { length: 255 }).notNull(),
+	deliveryPostalCode: varchar("delivery_postal_code", { length: 255 }),
+	deliveryId: varchar("delivery_id", { length: 255 }),
+	userAddress: json("user_address").$type<any | null>().default(null),
+
+	createdAt: timestamp().notNull().defaultNow(),
+	updatedAt: timestamp()
+		.notNull()
+		.defaultNow()
+		.$onUpdate(() => new Date()),
+});
+export const orderRelations = defineRelations(
+	{ orders, paymentIntents, organization, user },
+	(r) => ({
+		paymentIntents: {
+			user: r.one.user({
+				from: r.paymentIntents.userId,
+				to: r.user.id,
+			}),
+		},
+		orders: {
+			user: r.one.user({
+				from: r.orders.userId,
+				to: r.user.id,
+			}),
+			organization: r.one.organization({
+				from: r.orders.storeId,
+				to: r.organization.id,
+			}),
+		},
+	}),
+);
+
+export type PaymentIntents = typeof paymentIntents.$inferSelect;
+
+export type Order = typeof orders.$inferSelect;
+export type NewOrder = typeof orders.$inferInsert;

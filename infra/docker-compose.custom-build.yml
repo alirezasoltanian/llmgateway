@@ -192,7 +192,7 @@ services:
       timeout: 10s
       retries: 3
     networks:
-      - llmgateway-network
+      - shared_network
     environment:
       - API_URL=${API_URL:-http://localhost:4002}
       - API_BACKEND_URL=${API_BACKEND_URL:-http://api:80}

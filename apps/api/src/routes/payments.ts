@@ -875,8 +875,9 @@ payments.openapi(createCreditPaymentIntent, async (c) => {
 	// 		paymentType: "credit_topup",
 	// 	},
 	// });
-	// return c.json({
-	// 	callback: resRequestPaymentGateway.callback + resRequestPaymentGateway.id,
-	// 	paymentIntentId,
-	// });
+	return c.json({
+		callback: "",
+		// resRequestPaymentGateway.callback + resRequestPaymentGateway.id,
+		paymentIntentId: "",
+	});
 });

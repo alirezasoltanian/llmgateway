@@ -636,7 +636,7 @@ payments.openapi(calculateFeesRoute, async (c) => {
 
 	if (bonusEnabled) {
 		// Check email verification
-		if (!userOrganization.user || !userOrganization.user.emailVerified) {
+		if (!userOrganization.user) {
 			bonusIneligibilityReason = "email_not_verified";
 		} else {
 			// Check if this is the first credit purchase
@@ -681,6 +681,7 @@ const createCreditPaymentIntent = createRoute({
 					schema: z.object({
 						amount: z.number().int().min(5),
 						promoCode: z.string().optional(),
+						organizationId: z.string(),
 					}),
 				},
 			},
@@ -702,182 +703,167 @@ const createCreditPaymentIntent = createRoute({
 });
 
 payments.openapi(createCreditPaymentIntent, async (c) => {
-	// const user = c.get("user");
-	// if (!user) {
-	// 	throw new HTTPException(401, {
-	// 		message: "Unauthorized",
-	// 	});
-	// }
-	// const { amount, promoCode } = c.req.valid("json");
-	// const userOrganization = await db.query.userOrganization.findFirst({
-	// 	where: {
-	// 		userId: user.id,
-	// 	},
-	// 	with: {
-	// 		organization: true,
-	// 		user: true,
-	// 	},
-	// });
-	// if (!userOrganization || !userOrganization.organization) {
-	// 	throw new HTTPException(404, {
-	// 		message: "Organization not found",
-	// 	});
-	// }
-	// const organizationId = userOrganization.organization.id;
-	// const baseFeeBreakdown = calculateFees({
-	// 	amount,
-	// 	organizationPlan: userOrganization.organization.plan,
-	// });
-	// const promoAlreadyUsed =
-	// 	promoCode && (await hasUserUsedPromoCode(user.id, CYBER_MONDAY_PROMO_CODE));
-	// const promoResult =
-	// 	!promoCode || promoAlreadyUsed
-	// 		? {
-	// 				feeBreakdown: baseFeeBreakdown,
-	// 				promoDiscountAmount: 0,
-	// 				totalAmountBeforePromo: baseFeeBreakdown.totalAmount,
-	// 				promoCodeApplied: undefined as string | undefined,
-	// 			}
-	// 		: applyPromoDiscount({
-	// 				amount,
-	// 				feeBreakdown: baseFeeBreakdown,
-	// 				promoCode,
-	// 			});
-	// const {
-	// 	feeBreakdown,
-	// 	promoDiscountAmount,
-	// 	totalAmountBeforePromo,
-	// 	promoCodeApplied,
-	// } = promoResult;
-	// // Calculate bonus for first-time credit purchases
-	// let bonusAmount = 0;
-	// let finalCreditAmount = amount;
-	// const bonusMultiplier = process.env.FIRST_TIME_CREDIT_BONUS_MULTIPLIER
-	// 	? parseFloat(process.env.FIRST_TIME_CREDIT_BONUS_MULTIPLIER)
-	// 	: 0;
-	// if (bonusMultiplier > 1) {
-	// 	// Check email verification
-	// 	if (!userOrganization.user || !userOrganization.user.emailVerified) {
-	// 		// Not eligible for bonus
-	// 	} else {
-	// 		// Check if this is the first credit purchase
-	// 		const previousPurchases = await db.query.transaction.findFirst({
-	// 			where: {
-	// 				organizationId: { eq: organizationId },
-	// 				type: { eq: "credit_topup" },
-	// 				status: { eq: "completed" },
-	// 			},
-	// 		});
-	// 		if (!previousPurchases) {
-	// 			// This is the first credit purchase, apply bonus
-	// 			const potentialBonus = amount * (bonusMultiplier - 1);
-	// 			const maxBonus = 50; // Max $50 bonus
-	// 			bonusAmount = Math.min(potentialBonus, maxBonus);
-	// 			finalCreditAmount = amount + bonusAmount;
-	// 		}
-	// 	}
-	// }
-	// const paymentMethod = "gateway";
-	// const callbackUrl = process.env.SOLOP_APP_URL + "/check-payment/credits";
-	// // Convert USD to Rials (Toman * 10) for gateway
-	// const amountInRials = Math.round(feeBreakdown.totalAmount * 10);
-	// // Try Zarinpal first, fallback to Zibal
-	// let resRequestPaymentGateway = null;
-	// let paymentIntentId: string;
-	// // Try Zarinpal
-	// try {
-	// 	const zarinpalResponse = await fetch(
-	// 		"https://payment.zarinpal.com/pg/v4/payment/request.json",
-	// 		{
-	// 			method: "POST",
-	// 			headers: {
-	// 				accept: "application/json",
-	// 				"content-type": "application/json",
-	// 			},
-	// 			body: JSON.stringify({
-	// 				merchant_id: process.env.ZARINPAL_MERCHANT || "",
-	// 				amount: amountInRials,
-	// 				callback_url: callbackUrl,
-	// 				description: `Credit purchase for ${amount} USD (including fees)`,
-	// 				metadata: {},
-	// 			}),
-	// 		},
-	// 	);
-	// 	const zarinpalData = await zarinpalResponse.json();
-	// 	if (zarinpalData.data && zarinpalData.data.code === 100) {
-	// 		resRequestPaymentGateway = {
-	// 			id: zarinpalData.data.authority,
-	// 			type: "zarinpal",
-	// 			callback: "https://payment.zarinpal.com/pg/StartPay/",
-	// 		};
-	// 	}
-	// } catch {
-	// 	// Zarinpal failed, try Zibal
-	// }
-	// // If Zarinpal failed, try Zibal
-	// if (!resRequestPaymentGateway) {
-	// 	try {
-	// 		const zibalResponse = await fetch("https://gateway.zibal.ir/v1/request", {
-	// 			method: "POST",
-	// 			headers: {
-	// 				"Content-Type": "application/json",
-	// 			},
-	// 			body: JSON.stringify({
-	// 				merchant: process.env.ZIBAL_MERCHANT || "zibal",
-	// 				amount: amountInRials,
-	// 				callbackUrl: callbackUrl,
-	// 				description: `Credit purchase for ${amount} USD (including fees)`,
-	// 				orderId: "1234567890",
-	// 			}),
-	// 		});
-	// 		const zibalData = await zibalResponse.json();
-	// 		if (zibalData.result === 100) {
-	// 			resRequestPaymentGateway = {
-	// 				id: zibalData.trackId.toString(),
-	// 				type: "zibal",
-	// 				callback: "https://gateway.zibal.ir/start/",
-	// 			};
-	// 		}
-	// 	} catch {
-	// 		throw new HTTPException(500, {
-	// 			message: "Failed to create payment gateway request",
-	// 		});
-	// 	}
-	// }
-	// if (!resRequestPaymentGateway) {
-	// 	throw new HTTPException(500, {
-	// 		message: "Failed to create payment gateway request",
-	// 	});
-	// }
-	// paymentIntentId = resRequestPaymentGateway.id;
-	// // Store payment intent in database
-	// await db.insert(tables.paymentIntents).values({
-	// 	amount: feeBreakdown.totalAmount.toString(),
-	// 	description: `Credit purchase for ${amount} USD (including fees)`,
-	// 	paymentType: "credit_topup",
-	// 	paymentMethod: paymentMethod,
-	// 	paymentIntentId: paymentIntentId,
-	// 	currency: "USD",
-	// 	email: user.email,
-	// 	userId: user.id,
-	// 	storeId: organizationId,
-	// 	metadata: {
-	// 		organizationId,
-	// 		baseAmount: amount.toString(),
-	// 		totalFees: feeBreakdown.totalFees.toString(),
-	// 		userEmail: user.email,
-	// 		userId: user.id,
-	// 		promoCode: promoCodeApplied || "",
-	// 		promoDiscountAmount: promoDiscountAmount.toString(),
-	// 		totalAmountBeforePromo: totalAmountBeforePromo.toString(),
-	// 		bonusAmount: bonusAmount.toString(),
-	// 		finalCreditAmount: finalCreditAmount.toString(),
-	// 		paymentType: "credit_topup",
-	// 	},
-	// });
+	const user = c.get("user");
+	if (!user) {
+		throw new HTTPException(401, {
+			message: "Unauthorized",
+		});
+	}
+	const { amount, promoCode, organizationId } = c.req.valid("json");
+	const userOrganization = await db.query.userOrganization.findFirst({
+		where: {
+			userId: user.id,
+			organizationId,
+		},
+		with: {
+			organization: true,
+			user: true,
+		},
+	});
+	if (!userOrganization || !userOrganization.organization) {
+		throw new HTTPException(404, {
+			message: "Organization not found",
+		});
+	}
+
+	let bonusAmount = 0;
+	let finalCreditAmount = amount;
+	const bonusMultiplier = process.env.FIRST_TIME_CREDIT_BONUS_MULTIPLIER
+		? parseFloat(process.env.FIRST_TIME_CREDIT_BONUS_MULTIPLIER)
+		: 0;
+	if (bonusMultiplier > 1) {
+		// Check email verification
+		if (!userOrganization.user) {
+			// Not eligible for bonus
+		} else {
+			// Check if this is the first credit purchase
+			const previousPurchases = await db.query.transaction.findFirst({
+				where: {
+					organizationId: { eq: organizationId },
+					type: { eq: "credit_topup" },
+					status: { eq: "completed" },
+				},
+			});
+			if (!previousPurchases) {
+				// This is the first credit purchase, apply bonus
+				const potentialBonus = amount * (bonusMultiplier - 1);
+				const maxBonus = 50; // Max $50 bonus
+				bonusAmount = Math.min(potentialBonus, maxBonus);
+				finalCreditAmount = amount + bonusAmount;
+			}
+		}
+	}
+	const callbackUrl =
+		(process.env.NODE_ENV === "production"
+			? process.env.SOLOP_APP_URL
+			: "http://localhost:3000") + "/check-payment/credits";
+
+	const feeBreakdown = calculateFees({
+		amount,
+		organizationPlan: userOrganization.organization.plan,
+		cardCountry: "US",
+	});
+	// Convert USD to Rials (Toman * 10) for gateway
+	const amountInRials = feeBreakdown.totalAmount * 1_200_000;
+	// Try Zarinpal first, fallback to Zibal
+	let resRequestPaymentGateway = null;
+	let paymentIntentId: string;
+	const paymentMethod =
+		process.env.NODE_ENV === "production" ? "gateway" : "zibal";
+	// Try Zarinpal
+	if (paymentMethod === "gateway") {
+		try {
+			const zarinpalResponse = await fetch(
+				"https://payment.zarinpal.com/pg/v4/payment/request.json",
+				{
+					method: "POST",
+					headers: {
+						accept: "application/json",
+						"content-type": "application/json",
+					},
+					body: JSON.stringify({
+						merchant_id: process.env.ZARINPAL_MERCHANT || "",
+						amount: amountInRials,
+						callback_url: callbackUrl,
+						description: `Credit purchase for ${amount} USD (including fees)`,
+						metadata: {},
+					}),
+				},
+			);
+			const zarinpalData = await zarinpalResponse.json();
+			if (zarinpalData.data && zarinpalData.data.code === 100) {
+				resRequestPaymentGateway = {
+					id: zarinpalData.data.authority,
+					type: "zarinpal",
+					callback: "https://payment.zarinpal.com/pg/StartPay/",
+				};
+			}
+		} catch {
+			// Zarinpal failed, try Zibal
+		}
+	}
+
+	// If Zarinpal failed, try Zibal
+	if (!resRequestPaymentGateway || paymentMethod === "zibal") {
+		try {
+			const zibalResponse = await fetch("https://gateway.zibal.ir/v1/request", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					merchant: process.env.ZIBAL_MERCHANT || "zibal",
+					amount: amountInRials,
+					callbackUrl: callbackUrl,
+					description: `Credit purchase for ${amount} USD (including fees)`,
+					orderId: "1234567890",
+				}),
+			});
+			const zibalData = await zibalResponse.json();
+			if (zibalData.result === 100) {
+				resRequestPaymentGateway = {
+					id: zibalData.trackId.toString(),
+					type: "zibal",
+					callback: "https://gateway.zibal.ir/start/",
+				};
+			}
+		} catch {
+			throw new HTTPException(500, {
+				message: "Failed to create payment gateway request",
+			});
+		}
+	}
+	if (!resRequestPaymentGateway) {
+		throw new HTTPException(500, {
+			message: "Failed to create payment gateway request",
+		});
+	}
+	paymentIntentId = resRequestPaymentGateway.id;
+	// Store payment intent in database
+	await db.insert(tables.paymentIntents).values({
+		amount: JSON.stringify(Math.round(feeBreakdown.totalAmount * 100)),
+		description: `Credit purchase for ${amount} USD (including fees)`,
+		paymentType: "credit_topup",
+		paymentMethod: paymentMethod,
+		paymentIntentId: paymentIntentId,
+		currency: "USD",
+		email: user.email,
+		userId: user.id,
+		storeId: organizationId,
+		metadata: {
+			organizationId,
+			baseAmount: amount.toString(),
+			totalFees: feeBreakdown.totalFees.toString(),
+			userEmail: user.email,
+			userId: user.id,
+			promoCode,
+			bonusAmount: bonusAmount.toString(),
+			finalCreditAmount: finalCreditAmount.toString(),
+			paymentType: "credit_topup",
+		},
+	});
 	return c.json({
-		callback: "",
-		// resRequestPaymentGateway.callback + resRequestPaymentGateway.id,
-		paymentIntentId: "",
+		callback: resRequestPaymentGateway.callback + resRequestPaymentGateway.id,
+		paymentIntentId,
 	});
 });

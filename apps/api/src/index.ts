@@ -54,14 +54,13 @@ app.use("*", honoRequestLogger);
 app.use(
 	"*",
 	cors({
-		origin: (origin, c) => {
-			const allowed = process.env.ORIGIN_URLS?.split(",") || [];
+		origin: process.env.ORIGIN_URLS?.split(",") || [
+			"http://localhost:3002",
+			"http://localhost:3003",
+			"http://localhost:3006",
+			"http://localhost:3000",
+		],
 
-			if (!origin) {
-				return null;
-			}
-			return allowed.includes(origin) ? origin : null;
-		},
 		allowHeaders: ["Content-Type", "Authorization", "Cache-Control"],
 		allowMethods: ["POST", "GET", "OPTIONS", "PUT", "PATCH", "DELETE"],
 		exposeHeaders: ["Content-Length"],
